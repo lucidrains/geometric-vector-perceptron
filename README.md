@@ -13,20 +13,17 @@ $ pip install geometric-vector-perceptron
 ```python
 import torch
 from geometric_vector_perceptron import GVP
-from pytorch3d.transforms import random_rotation
 
 model = GVP(
-    dim_v = 1024,
-    dim_n = 512,
-    dim_m = 256,
-    dim_u = 512
+    dim_coors_in = 1024,
+    dim_feats_in = 512,
+    dim_coors_out = 256,
+    dim_feats_out = 512
 )
 
-feats = torch.randn(1, 512)
-coors = torch.randn(1, 1024, 3)
+feats, coors = (torch.randn(1, 512), torch.randn(1, 1024, 3))
 
-feats_out, coors_out = model(feats, coors)
-# (1, 256), (1, 512, 3)
+feats_out, coors_out = model(feats, coors) # (1, 256), (1, 512, 3)
 ```
 
 ## Citations

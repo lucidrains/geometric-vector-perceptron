@@ -6,25 +6,25 @@ class GVP(nn.Module):
     def __init__(
         self,
         *,
-        dim_v,
-        dim_n,
-        dim_m,
-        dim_u,
+        dim_coors_in,
+        dim_feats_in,
+        dim_feats_out,
+        dim_coors_out,
         σ = nn.Sigmoid(),
         σ_plus = nn.Sigmoid()
     ):
         super().__init__()
-        self.dim_v = dim_v
-        self.dim_n = dim_n
+        self.dim_coors_in = dim_coors_in
+        self.dim_feats_in = dim_feats_in
 
-        self.dim_u = dim_u
-        dim_h = max(dim_v, dim_u)
+        self.dim_coors_out = dim_coors_out
+        dim_h = max(dim_coors_in, dim_coors_out)
 
-        self.Wh = nn.Parameter(torch.randn(dim_v, dim_h))
-        self.Wu = nn.Parameter(torch.randn(dim_h, dim_u))
+        self.Wh = nn.Parameter(torch.randn(dim_coors_in, dim_h))
+        self.Wu = nn.Parameter(torch.randn(dim_h, dim_coors_out))
 
-        self.Wm = nn.Parameter(torch.randn(dim_h + dim_n, dim_m))
-        self.Bm = nn.Parameter(torch.randn(1, dim_m))
+        self.Wm = nn.Parameter(torch.randn(dim_h + dim_feats_in, dim_feats_out))
+        self.Bm = nn.Parameter(torch.randn(1, dim_feats_out))
 
         self.σ = σ
         self.σ_plus = σ_plus
@@ -32,8 +32,8 @@ class GVP(nn.Module):
     def forward(self, feats, coors):
         b, n, _, v, c = *feats.shape, *coors.shape
 
-        assert c == 3 and v == self.dim_v, 'coordinates have wrong dimensions'
-        assert n == self.dim_n, 'scalar features have wrong dimensions'
+        assert c == 3 and v == self.dim_coors_in, 'coordinates have wrong dimensions'
+        assert n == self.dim_feats_in, 'scalar features have wrong dimensions'
 
         Vh = einsum('b v c, v h -> b h c', coors, self.Wh)
         Vu = einsum('b h c, h u -> b u c', Vh, self.Wu)

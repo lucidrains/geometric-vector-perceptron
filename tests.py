@@ -11,10 +11,10 @@ def test_equivariance():
     R = random_rotation()
 
     model = GVP(
-        dim_v = 1024,
-        dim_n = 512,
-        dim_m = 512,
-        dim_u = 1024
+        dim_coors_in = 1024,
+        dim_feats_in = 512,
+        dim_coors_out = 256,
+        dim_feats_out = 512
     )
 
     feats = torch.randn(1, 512)
