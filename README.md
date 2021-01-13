@@ -1,2 +1,17 @@
-# geometric-vector-perceptron
-Implementation of Geometric Vector Perceptron, a simple circuit for 3d rotation equivariance for learning over large biomolecules, in Pytorch. Idea proposed and accepted at ICLR 2021
+## Geometric Vector Perceptron
+
+Implementation of Geometric Vector Perceptron, a simple circuit for 3d rotation equivariance for learning over large biomolecules, in Pytorch. The repository may also contain experimentation to see if this could be easily extended to self-attention.
+
+## Citations
+
+```bibtex
+@inproceedings{
+    anonymous2021learning,
+    title={Learning from Protein Structure with Geometric Vector Perceptrons},
+    author={Anonymous},
+    booktitle={Submitted to International Conference on Learning Representations},
+    year={2021},
+    url={https://openreview.net/forum?id=1YLJDvSx6J4},
+    note={under review}
+}
+```
