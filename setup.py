@@ -17,8 +17,7 @@ setup(
     'equivariance'
   ],
   install_requires=[
-    'torch>=1.6',
-    'einops>=0.3'
+    'torch>=1.6'
   ],
   classifiers=[
     'Development Status :: 4 - Beta',
