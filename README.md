@@ -1,4 +1,4 @@
-## Geometric Vector Perceptron
+## Geometric Vector Perceptron (wip)
 
 Implementation of Geometric Vector Perceptron, a simple circuit for 3d rotation equivariance for learning over large biomolecules, in Pytorch. The repository may also contain experimentation to see if this could be easily extended to self-attention.
 
