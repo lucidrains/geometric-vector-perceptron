@@ -17,15 +17,15 @@ import torch
 from geometric_vector_perceptron import GVP
 
 model = GVP(
-    dim_coors_in = 1024,
+    dim_vectors_in = 1024,
     dim_feats_in = 512,
-    dim_coors_out = 256,
+    dim_vectors_out = 256,
     dim_feats_out = 512
 )
 
-feats, coors = (torch.randn(1, 512), torch.randn(1, 1024, 3))
+feats, vectors = (torch.randn(1, 512), torch.randn(1, 1024, 3))
 
-feats_out, coors_out = model(feats, coors) # (1, 256), (1, 512, 3)
+feats_out, vectors_out = model(feats, vectors) # (1, 256), (1, 512, 3)
 ```
 
 ## Citations
