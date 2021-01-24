@@ -10,6 +10,11 @@ Implementation of <a href="https://openreview.net/forum?id=1YLJDvSx6J4">Geometri
 $ pip install geometric-vector-perceptron
 ```
 
+### Functionality
+* `GVP`: Implementing the basic geometric vector perceptron.
+* `GVPDropout`: Adapted dropout for GVP in MPNN context
+* `GVPLayerNorm`: Adapted LayerNorm for GVP in MPNN context
+
 ## Usage
 
 ```python
@@ -22,11 +27,18 @@ model = GVP(
     dim_vectors_out = 256,
     dim_feats_out = 512
 )
+dropout = GVPDropout(0.2)
+layer_norm = GVPLayerNorm(512)
 
-feats, vectors = (torch.randn(1, 512), torch.randn(1, 1024, 3))
+feats, message, vectors = (torch.randn(1, 512), torch.randn(1, 512), torch.randn(1, 1024, 3))
 
 feats_out, vectors_out = model(feats, vectors) # (1, 256), (1, 512, 3)
+feats_out, vectors_out = dropout(feats_out, vectors_out, training=True)
+feats_out, vectors_out = layer_norm(feats_out, vectors_out)
 ```
+
+#### TF implementation:
+The original implementation in TF by the paper authors can be found here: https://github.com/drorlab/gvp/
 
 ## Citations
 

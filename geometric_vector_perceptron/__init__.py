@@ -1,1 +1,1 @@
-from geometric_vector_perceptron.geometric_vector_perceptron import GVP
+from geometric_vector_perceptron.geometric_vector_perceptron import GVP, GVPDropout, GVPLayerNorm

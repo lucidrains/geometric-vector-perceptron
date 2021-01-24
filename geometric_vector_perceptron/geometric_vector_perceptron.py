@@ -47,3 +47,33 @@ class GVP(nn.Module):
         vectors_out = self.vectors_activation(vu) * Vu
 
         return feats_out, vectors_out
+
+
+class GVPDropout(nn.Module):
+    """ Separate dropout for scalars and vectors. """
+    def __init__(self, rate):
+        super(GVPDropout, self).__init__()
+        self.vdropout = nn.Dropout2d(p = rate)
+        self.fdropout = nn.Dropout(p = rate)
+
+    def forward(self, feats, vectors, training=None):
+        if not training: 
+            return x
+        return self.fdropout(feats), self.vdropout(vectors)
+
+
+class GVPLayerNorm(nn.Module):
+    """ Normal layer norm for scalars, nontrainable norm for vectors. """
+    def __init__(self, feats_h_size):
+        super(GVPLayerNorm, self).__init__()
+        self.fnorm = nn.LayerNorm(feats_h_size)
+
+    def forward(self, feats, vectors):
+        vnorm = torch.linalg.norm(vectors, dim=(-1,-2), keepdim=True)
+        return self.fnorm(feats), vectors/vnorm
+
+
+
+
+
+
