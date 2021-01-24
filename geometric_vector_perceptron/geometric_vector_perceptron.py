@@ -48,32 +48,25 @@ class GVP(nn.Module):
 
         return feats_out, vectors_out
 
-
 class GVPDropout(nn.Module):
     """ Separate dropout for scalars and vectors. """
     def __init__(self, rate):
-        super(GVPDropout, self).__init__()
-        self.vdropout = nn.Dropout2d(p = rate)
-        self.fdropout = nn.Dropout(p = rate)
+        super().__init__()
+        self.vector_dropout = nn.Dropout2d(rate)
+        self.feat_dropout = nn.Dropout(rate)
 
-    def forward(self, feats, vectors, training=None):
-        if not training: 
-            return x
-        return self.fdropout(feats), self.vdropout(vectors)
-
+    def forward(self, feats, vectors):
+        return self.feat_dropout(feats), self.vector_dropout(vectors)
 
 class GVPLayerNorm(nn.Module):
     """ Normal layer norm for scalars, nontrainable norm for vectors. """
-    def __init__(self, feats_h_size):
-        super(GVPLayerNorm, self).__init__()
-        self.fnorm = nn.LayerNorm(feats_h_size)
+    def __init__(self, feats_h_size, eps = 1e-8):
+        super().__init__()
+        self.eps = eps
+        self.feat_norm = nn.LayerNorm(feats_h_size)
 
     def forward(self, feats, vectors):
-        vnorm = torch.linalg.norm(vectors, dim=(-1,-2), keepdim=True)
-        return self.fnorm(feats), vectors/vnorm
-
-
-
-
-
-
+        vector_norm = vectors.norm(dim=(-1,-2), keepdim=True)
+        normed_feats = self.feat_norm(feats)
+        normed_vectors = vectors / (vector_norm + self.eps)
+        return normed_feats, normed_vectors
