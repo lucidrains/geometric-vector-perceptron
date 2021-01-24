@@ -53,7 +53,7 @@ def test_all_layer_types():
     assert list(feats_out.shape) == [1, 512] and list(vectors_out.shape) == [1, 256, 3]
 
     # GVP Dropout
-    feats_out, vectors_out = dropout(feats_out, vectors_out, training=True)
+    feats_out, vectors_out = dropout(feats_out, vectors_out)
     assert list(feats_out.shape) == [1, 512] and list(vectors_out.shape) == [1, 256, 3]
 
     # GVP Layer Norm
