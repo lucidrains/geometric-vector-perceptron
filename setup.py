@@ -3,10 +3,10 @@ from setuptools import setup, find_packages
 setup(
   name = 'geometric-vector-perceptron',
   packages = find_packages(),
-  version = '0.0.2',
+  version = '0.0.3',
   license='MIT',
   description = 'Geometric Vector Perceptron - Pytorch',
-  author = 'Phil Wang',
+  author = 'Phil Wang and Eric Alcaide',
   author_email = 'lucidrains@gmail.com',
   url = 'https://github.com/lucidrains/geometric-vector-perceptron',
   keywords = [
@@ -17,7 +17,8 @@ setup(
     'equivariance'
   ],
   install_requires=[
-    'torch>=1.6'
+    'torch>=1.6', 
+    'torch_geometric'
   ],
   classifiers=[
     'Development Status :: 4 - Beta',

@@ -49,7 +49,7 @@ def test_all_layer_types():
 
 
     # GVP layer
-    feats_out, vectors_out = model(feats, diff_matrix(vectors))
+    feats_out, vectors_out = model( (feats, diff_matrix(vectors)) )
     assert list(feats_out.shape) == [1, 512] and list(vectors_out.shape) == [1, 256, 3]
 
     # GVP Dropout
