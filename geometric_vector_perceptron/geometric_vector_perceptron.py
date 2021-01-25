@@ -1,9 +1,9 @@
 import torch
 from torch import nn, einsum
-from torch_geometric import MessagePassing
+from torch_geometric.nn import MessagePassing
 # types
 from typing import Optional, List, Union
-from torch_geometric.typing import OptPairTensor, Adj, Size, OptTensor
+from torch_geometric.typing import OptPairTensor, Adj, Size, OptTensor, Tensor
 
 class GVP(nn.Module):
     def __init__(
@@ -85,59 +85,104 @@ class GVP_MPNN(MessagePassing):
         MLP in aggregation phase.
 
         Args:
-        * dim_vectors_in: int. number of dimensions in the vector inputs.
-        * dim_vectors_in: int. number of dimensions in the vector hidden state.
-        * dim_feats_in: int. number of dimensions in the feature inputs.
-        * dim_feats_in: int. number of dimensions in the feature hidden state.
+        * feats_x_in: int. number of scalar dimensions in the x inputs.
+        * vectors_x_in: int. number of vector dimensions in the x inputs.
+        * feats_x_out: int. number of scalar dimensions in the x outputs.
+        * vectors_x_out: int. number of vector dimensions in the x outputs.
+        * feats_edge_in: int. number of scalar dimensions in the edge_attr inputs.
+        * vectors_edge_in: int. number of vector dimensions in the edge_attr inputs.
+        * feats_edge_out: int. number of scalar dimensions in the edge_attr outputs.
+        * vectors_edge_out: int. number of vector dimensions in the edge_attr outputs.
         * dropout: float. dropout rate.
+        * vector_dim: int. dimensions of the space containing the vectors.
         * verbose: bool. verbosity level.
     """
-    def __init__(self, dim_vectors_in, dim_vectors_h,
-                       dim_feats_out, dim_feats_h,
-                       dropout, verbose=False, **kwargs):
-        super(MessagePassing, self).__init__(aggr="mean",**kwargs)
+    def __init__(self, feats_x_in, vectors_x_in,
+                       feats_x_out, vectors_x_out,
+                       feats_edge_in, vectors_edge_in,
+                       feats_edge_out, vectors_edge_out,
+                       dropout, vector_dim=3, verbose=False, **kwargs):
+        super(GVP_MPNN, self).__init__(aggr="mean",**kwargs)
         self.verbose = verbose
-        # layer params
-        self.dim_vectors_h = dim_vectors_h
-        self.dim_vectors_in = dim_vectors_in
-        self.dim_feats_h = dim_feats_h
-        self.dim_feats_in = dim_feats_in
-        self.vo, self.fo = vo, fo = dim_vectors_h, dim_feats_h
-        self.norm = [GVPLayerNorm(vo) for _ in range(2)]
+        # record x dimensions ( vector + scalars )
+        self.feats_x_in    = feats_x_in 
+        self.vectors_x_in  = vectors_x_in # N vectors features in input
+        self.feats_x_out   = feats_x_out 
+        self.vectors_x_out = vectors_x_out # N vectors features in output
+        # record edge_attr dimensions ( vector + scalars )
+        self.feats_edge_in    = feats_edge_in 
+        self.vectors_edge_in  = vectors_edge_in # N vectors features in input
+        self.feats_edge_out   = feats_edge_out 
+        self.vectors_edge_out = vectors_edge_out # N vectors features in output
+        # aux layers
+        self.vector_dim = vector_dim
+        self.norm = [GVPLayerNorm(self.feats_x_out), # + self.feats_edge_out
+                     GVPLayerNorm(self.feats_x_out)]
         self.dropout = GVPDropout(dropout)
         # this receives the vec_in message AND the receiver node
-        self.W_EV = Sequential([GVP(dim_vectors_in=dim_vectors_in, dim_vectors_out=vo, dim_feats_in=dim_feats_in, dim_feats_out=fo), 
-                                GVP(dim_vectors_in=vo, dim_vectors_out=vo, dim_feats_in=fo, dim_feats_out=fo),
-                                GVP(dim_vectors_in=vo, dim_vectors_out=vo, dim_feats_in=fo, dim_feats_out=fo)])
+        self.W_EV = nn.Sequential(GVP(
+                                      dim_vectors_in = self.vectors_x_in + self.vectors_edge_in, 
+                                      dim_vectors_out = self.vectors_x_out + self.feats_edge_out,
+                                      dim_feats_in = self.feats_x_in + self.feats_edge_in, 
+                                      dim_feats_out = self.feats_x_out + self.feats_edge_out
+                                  ), 
+                                  GVP(
+                                      dim_vectors_in = self.vectors_x_out + self.feats_edge_out, 
+                                      dim_vectors_out = self.vectors_x_out + self.feats_edge_out,
+                                      dim_feats_in = self.feats_x_out + self.feats_edge_out,
+                                      dim_feats_out = self.feats_x_out + self.feats_edge_out
+                                  ),
+                                  GVP(
+                                      dim_vectors_in = self.vectors_x_out + self.feats_edge_out, 
+                                      dim_vectors_out = self.vectors_x_out + self.feats_edge_out,
+                                      dim_feats_in = self.feats_x_out + self.feats_edge_out,
+                                      dim_feats_out = self.feats_x_out + self.feats_edge_out
+                                  ))
         
-        self.W_dh = Sequential([GVP(dim_vectors_in=vo, dim_vectors_out=2*vo, dim_feats_in=fo, dim_feats_out=4*fo),
-                                GVP(dim_vectors_in=2*vo, dim_vectors_out=vo, dim_feats_in=4*fo, dim_feats_out=fo)])
+        self.W_dh = nn.Sequential(GVP(
+                                      dim_vectors_in = self.vectors_x_out,
+                                      dim_vectors_out = 2*self.vectors_x_out,
+                                      dim_feats_in = self.feats_x_out,
+                                      dim_feats_out = 4*self.feats_x_out
+                                  ),
+                                  GVP(
+                                      dim_vectors_in = 2*self.vectors_x_out,
+                                      dim_vectors_out = self.vectors_x_out,
+                                      dim_feats_in = 4*self.feats_x_out,
+                                      dim_feats_out = self.feats_x_out
+                                  ))
 
 
     def forward(self, x: Union[Tensor, OptPairTensor], edge_index: Adj,
                 edge_attr: OptTensor = None, size: Size = None) -> Tensor:
         """"""
-        if isinstance(edge_index, SparseTensor):
-            edge_attr = edge_index.storage.value()
-            if edge_attr is not None:
-                assert x[0].size(-1) == edge_attr.size(-1)
-
-        # TODO: customize aggr so that sums are performed both in nodes and edges
-        # return x, modified x, edge_attrs
-        out_nodes, out_edges = self.propagate(edge_index, x=x, edge_attr=edge_attr)
+        # separate features and vectors in origin:
+        x_size = list(x.shape)[-1]
+        # aggregate feats and vectors separately
+        feats, vectors = self.propagate(edge_index, x=x, edge_attr=edge_attr)
         # aggregate
-        aggr_nodes, aggr_edges = self.dropout(out_nodes, out_edges)
-        out_nodes, out_edges = self.norm[0]( x + aggr_nodes, edge_attr + aggr_edges )
+        feats, vectors = self.dropout(feats, vectors.reshape(vectors.shape[0], -1, self.vector_dim))
+        # get the information relative to the nodes
+        feats_nodes  = feats[:, :self.feats_x_in]
+        vector_nodes = vectors[:, :self.vectors_x_in]
+        # reshapes the vector part to last 3d
+        x_vectors    = x[:, :self.vectors_x_in * self.vector_dim].reshape(x.shape[0], -1, self.vector_dim)
+        feats, vectors = self.norm[0]( x[:, self.vectors_x_in * self.vector_dim:]+feats_nodes, x_vectors+vector_nodes )
         # update position-wise feedforward
-        pw_nodes, pw_edges = self.dropout( *self.W_dh(out) )
-        out_nodes, out_edges = self.norm[1]( x + pw_nodes, edge_attr + pw_edges )
-
-        return out_nodes, out_edges
+        feats_, vectors_ = self.dropout( *self.W_dh( (feats, vectors) ) )
+        feats, vectors   = self.norm[1]( feats+feats_, vectors+vectors_ )
+        # replace in the original
+        x = torch.cat( [feats, vectors.flatten(start_dim=-2)], dim=-1 )
+        return x
 
 
     def message(self, x_j, edge_attr) -> Tensor:
-        msg, edges = self.W_EV( (x_j, edge_attr) )
-        return msg, edges
+        feats   = torch.cat([ x_j[:, self.vectors_x_in * self.vector_dim:],
+                              edge_attr[:, self.vectors_edge_in * self.vector_dim:] ], dim=-1)
+        vectors = torch.cat([ x_j[:, :self.vectors_x_in * self.vector_dim], 
+                              edge_attr[:, :self.vectors_edge_in * self.vector_dim] ], dim=-1).reshape(x_j.shape[0],-1,self.vector_dim)
+        feats, vectors = self.W_EV( (feats, vectors) )
+        return feats, vectors.flatten(start_dim=-2)
 
 
     def propagate(self, edge_index: Adj, size: Size = None, **kwargs):
@@ -152,13 +197,19 @@ class GVP_MPNN(MessagePassing):
             **kwargs: Any additional data which is needed to construct and
                 aggregate messages, and to update node embeddings.
         """
-        msg, edges = self.message(**msg_kwargs)
+        size = self.__check_input__(edge_index, size)
+        coll_dict = self.__collect__(self.__user_args__,
+                                     edge_index, size, kwargs)
+        msg_kwargs = self.inspector.distribute('message', coll_dict)
+        out = self.message(**msg_kwargs)
+        feats, vectors = self.message(**msg_kwargs)
         # aggregate them
         aggr_kwargs = self.inspector.distribute('aggregate', coll_dict)
-        out_msg     = self.aggregate(msg, **aggr_kwargs)
-        out_edges   = self.aggregate(edges, **aggr_kwargs)
-        
-        return out_msg, out_edges
+        out_feats   = self.aggregate(feats, **aggr_kwargs)
+        out_vectors = self.aggregate(vectors, **aggr_kwargs)
+        # return tuple
+        update_kwargs = self.inspector.distribute('update', coll_dict)
+        return self.update((out_feats, out_vectors), **update_kwargs)
 
         
     def __repr__(self):
