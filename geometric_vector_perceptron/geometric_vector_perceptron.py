@@ -213,7 +213,13 @@ class GVP_MPNN(MessagePassing):
 
         
     def __repr__(self):
-        return  'GVP_MPNN Layer with the following attributes: ' + \
-                'dim_vectors_in={0}, dim_vectors_h={1}, dropout={2}'.format(self.dim_vectors_in,
-                                                                            self.dim_vectors_h,
-                                                                            self.dropout)
+        dict_print = { "feats_x_in": feats_x_in, 
+                       "vectors_x_in": vectors_x_in,
+                       "feats_x_out": feats_x_out,
+                       "vectors_x_out": vectors_x_out, 
+                       "feats_edge_in": feats_edge_in,
+                       "vectors_edge_in": vectors_edge_in, 
+                       "feats_edge_out": feats_edge_out,
+                       "vectors_edge_out": vectors_edge_out,
+                       "vector_dim": vector_dim }
+        return  'GVP_MPNN Layer with the following attributes: ' + str(dict_print)

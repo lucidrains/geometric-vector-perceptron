@@ -3,11 +3,7 @@ from setuptools import setup, find_packages
 setup(
   name = 'geometric-vector-perceptron',
   packages = find_packages(),
-<<<<<<< HEAD
-  version = '0.0.3',
-=======
   version = '0.0.5',
->>>>>>> 21fcd8207e99fb79e4ee21e88bd57b7a136eddda
   license='MIT',
   description = 'Geometric Vector Perceptron - Pytorch',
   author = 'Phil Wang and Eric Alcaide',
@@ -21,8 +17,13 @@ setup(
     'equivariance'
   ],
   install_requires=[
-    'torch>=1.6', 
-    'torch_geometric'
+    'torch>=1.6',
+    'torch-scatter',
+    'torch-sparse',
+    'torch-cluster',
+    'torch-spline-conv',
+    'torch-geometric'
+
   ],
   classifiers=[
     'Development Status :: 4 - Beta',
