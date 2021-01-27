@@ -6,7 +6,7 @@ setup(
   version = '0.0.5',
   license='MIT',
   description = 'Geometric Vector Perceptron - Pytorch',
-  author = 'Phil Wang',
+  author = 'Phil Wang and Eric Alcaide',
   author_email = 'lucidrains@gmail.com',
   url = 'https://github.com/lucidrains/geometric-vector-perceptron',
   keywords = [
@@ -17,7 +17,13 @@ setup(
     'equivariance'
   ],
   install_requires=[
-    'torch>=1.6'
+    'torch>=1.6',
+    'torch-scatter',
+    'torch-sparse',
+    'torch-cluster',
+    'torch-spline-conv',
+    'torch-geometric'
+
   ],
   classifiers=[
     'Development Status :: 4 - Beta',

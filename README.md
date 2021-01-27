@@ -14,6 +14,7 @@ $ pip install geometric-vector-perceptron
 * `GVP`: Implementing the basic geometric vector perceptron.
 * `GVPDropout`: Adapted dropout for GVP in MPNN context
 * `GVPLayerNorm`: Adapted LayerNorm for GVP in MPNN context
+* `GVP_MPNN`: Adapted instance of Message Passing class from `torch-geometric` package. Still not tested.
 
 ## Usage
 
@@ -30,7 +31,7 @@ model = GVP(
 
 feats, vectors = (torch.randn(1, 512), torch.randn(1, 1024, 3))
 
-feats_out, vectors_out = model(feats, vectors) # (1, 256), (1, 512, 3)
+feats_out, vectors_out = model( (feats, vectors) ) # (1, 256), (1, 512, 3)
 ```
 
 With the specialized dropout and layernorm as described in the paper
@@ -52,7 +53,7 @@ norm = GVPLayerNorm(512)
 
 feats, vectors = (torch.randn(1, 512), torch.randn(1, 1024, 3))
 
-feats, vectors = model(feats, vectors)
+feats, vectors = model( (feats, vectors) )
 feats, vectors = dropout(feats, vectors)
 feats, vectors = norm(feats, vectors)  # (1, 256), (1, 512, 3)
 ```
