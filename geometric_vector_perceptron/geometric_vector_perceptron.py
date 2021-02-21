@@ -84,6 +84,8 @@ class GVP_MPNN(MessagePassing):
         Uses a Geometric Vector Perceptron instead of the normal 
         MLP in aggregation phase.
 
+        Inputs will be a concatenation of (vectors, features)
+
         Args:
         * feats_x_in: int. number of scalar dimensions in the x inputs.
         * vectors_x_in: int. number of vector dimensions in the x inputs.
@@ -156,13 +158,12 @@ class GVP_MPNN(MessagePassing):
     def forward(self, x: Union[Tensor, OptPairTensor], edge_index: Adj,
                 edge_attr: OptTensor = None, size: Size = None) -> Tensor:
         """"""
-        # separate features and vectors in origin:
         x_size = list(x.shape)[-1]
         # aggregate feats and vectors separately
         feats, vectors = self.propagate(edge_index, x=x, edge_attr=edge_attr)
         # aggregate
         feats, vectors = self.dropout(feats, vectors.reshape(vectors.shape[0], -1, self.vector_dim))
-        # get the information relative to the nodes
+        # get the information relative to the nodes - edges not returned
         feats_nodes  = feats[:, :self.feats_x_in]
         vector_nodes = vectors[:, :self.vectors_x_in]
         # reshapes the vector part to last 3d
@@ -223,3 +224,49 @@ class GVP_MPNN(MessagePassing):
                        "vectors_edge_out": vectors_edge_out,
                        "vector_dim": vector_dim }
         return  'GVP_MPNN Layer with the following attributes: ' + str(dict_print)
+
+
+class GVP_Network():
+    def __init__(self, n_layers, 
+                       feats_x_in, vectors_x_in,
+                       feats_x_out, vectors_x_out,
+                       feats_edge_in, vectors_edge_in,
+                       feats_edge_out, vectors_edge_out,
+                       dropout, vector_dim=3, verbose=False):
+        super().__init__()
+        self.n_layers         = n_layers  
+        self.fc_layers        = torch.nn.ModuleList()
+        self.gcnn_layers      = torch.nn.ModuleList()
+        self.feats_x_in       = feats_x_in
+        self.vectors_x_in     = vectors_x_in
+        self.feats_x_out      = feats_x_out
+        self.vectors_x_out    = vectors_x_out
+        self.feats_edge_in    = feats_edge_in
+        self.vectors_edge_in  = vectors_edge_in
+        self.feats_edge_out   = feats_edge_out
+        self.vectors_edge_out = vectors_edge_out
+        self.dropout          = dropout
+        self.vector_dim       = vector_dim
+        self.verbose          = verbose
+        # instantiate layers
+        for i in range(n_layers):
+            layer = GVP_MPNN(feats_x_in, vectors_x_in,
+                             feats_x_out, vectors_x_out,
+                             feats_edge_in, vectors_edge_in,
+                             feats_edge_out, vectors_edge_out,
+                             dropout, vector_dim=vector_dim, verbose=verbose)
+            self.gcnn_layers.append(layer)
+
+    def forward(self, x, edge_index, batch, edge_attr, bsize=None):
+        # pass layers
+        for i,layer in enumerate(self.gcnn_layers):
+          x = layer(x, edge_index, edge_attr, size=bsize)
+        return x
+
+    def __repr__(self):
+        return 'GVP_Network of: {0} layers'.format(len(self.gcnn_layers))
+
+
+
+
+
