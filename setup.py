@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 setup(
   name = 'geometric-vector-perceptron',
   packages = find_packages(),
-  version = '0.0.6',
+  version = '0.0.7',
   license='MIT',
   description = 'Geometric Vector Perceptron - Pytorch',
   author = 'Phil Wang and Eric Alcaide',
