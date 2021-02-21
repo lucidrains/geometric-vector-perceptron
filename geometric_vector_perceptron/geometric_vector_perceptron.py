@@ -248,6 +248,7 @@ class GVP_Network():
         self.dropout          = dropout
         self.vector_dim       = vector_dim
         self.verbose          = verbose
+
         # instantiate layers
         for i in range(n_layers):
             layer = GVP_MPNN(feats_x_in, vectors_x_in,
@@ -265,8 +266,3 @@ class GVP_Network():
 
     def __repr__(self):
         return 'GVP_Network of: {0} layers'.format(len(self.gcnn_layers))
-
-
-
-
-
