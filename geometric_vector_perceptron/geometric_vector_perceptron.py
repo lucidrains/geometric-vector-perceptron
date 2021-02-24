@@ -118,8 +118,8 @@ class GVP_MPNN(MessagePassing):
         self.vectors_edge_out = vectors_edge_out # N vectors features in output
         # aux layers
         self.vector_dim = vector_dim
-        self.norm = [GVPLayerNorm(self.feats_x_out), # + self.feats_edge_out
-                     GVPLayerNorm(self.feats_x_out)]
+        self.norm = nn.ModuleList([GVPLayerNorm(self.feats_x_out), # + self.feats_edge_out
+                                   GVPLayerNorm(self.feats_x_out)])
         self.dropout = GVPDropout(dropout)
         # this receives the vec_in message AND the receiver node
         self.W_EV = nn.Sequential(GVP(
