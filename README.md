@@ -15,6 +15,7 @@ $ pip install geometric-vector-perceptron
 * `GVPDropout`: Adapted dropout for GVP in MPNN context
 * `GVPLayerNorm`: Adapted LayerNorm for GVP in MPNN context
 * `GVP_MPNN`: Adapted instance of Message Passing class from `torch-geometric` package. Still not tested.
+* `GVP_Network`: Functional model architecture ready for working with arbitary point clouds.
 
 ## Usage
 
