@@ -9,6 +9,8 @@ __pycache__/
 # macos files
 .DS_Store
 *.DS_Store
+*sidechainnet_data/*
+*.pkl
 
 # Distribution / packaging
 .Python
