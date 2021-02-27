@@ -23,7 +23,12 @@ setup(
     'torch-cluster',
     'torch-spline-conv',
     'torch-geometric'
-
+  ],
+  setup_requires=[
+    'pytest-runner',
+  ],
+  tests_require=[
+    'pytest'
   ],
   classifiers=[
     'Development Status :: 4 - Beta',
