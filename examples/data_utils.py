@@ -107,6 +107,7 @@ GVP_DATA = {
         }
     }
 
+
 #################################
 ##### ORIGINAL PROJECT DATA #####
 #################################
@@ -145,8 +146,6 @@ def graph_laplacian_embedds(edges, eigen_k, center_idx=1, norm=False):
             laplace[i,j] = laplace[j,i] = -1 / (deg_mat[i,i] * deg_mat[j,j])**0.5
     # get laplacian basis - eigendecomposition - order importance by eigenvalue
     e, v = torch.symeig(laplace, eigenvectors=True)
-    # e, v = np.linalg.eigh(laplace.numpy())
-    # e, v = torch.from_numpy(e), torch.from_numpy(v)
     idxs = torch.sort( e.abs(), descending=True)[1]
     # take embedds and center
     embedds = v[:, idxs[:eigen_k]]
@@ -219,6 +218,29 @@ def decode_dist(x, scales=[1,2,4,8]):
     half = x.shape[-1]//2
     x_new = (torch.atan2(x[..., :half], x[..., half:]) * scales) % (2*np.pi)
     return x_new
+
+
+def prot_covalent_bond(seq, cloud_mask=None):
+    """ Returns the idxs of covalent bonds for a protein.
+        Inputs 
+        * seq: str. Protein sequence in 1-letter AA code.
+        * cloud_mask: mask selecting the present atoms.
+        Outputs: edge_idxs
+    """
+    # create or infer
+    if cloud_mask is None: 
+        cloud_mask = scn_cloud_mask(seq).bool()
+    device, precise = cloud_mask.device, cloud_mask.type()
+    # get starting poses for every aa
+    scaff = torch.zeros_like(cloud_mask)
+    scaff[:, 0] = 1
+    idxs = scaff[cloud_mask].nonzero().view(-1)
+    # get poses + idxs from the dict with GVP_DATA
+    bond_idxs = []
+    for i,idx in enumerate(idxs): 
+        bond_idxs.append( idx + torch.tensor( GVP_DATA[seq[i]]['bonds'] ).long().t() )
+    # return all edges
+    return torch.cat(bond_idxs, dim=-1).to(device)
 
 
 def dist2ca(x, mask=None, eps=1e-7):
@@ -316,14 +338,23 @@ def encode_whole_bonds(x, x_format="coords", embedd_info={},
 
     # encode bonds
 
-    # 1. find bonds and other cutoffs = d(i - j) < 2A or XA 
+    # 1. BONDS: find the covalent bond_indices
+    native_bond_idxs = prot_covalent_bond(needed_info["seq"])
+
+    # points under cutoff = d(i - j) < X 
     cutoffs = torch.tensor(needed_info["cutoffs"], device=device).type(precise)
     dist_mat = torch.cdist(x, x, p=2)
     bond_buckets = torch.bucketize(dist_mat, cutoffs) 
-    # find atoms inside different thresholds - avoid same atom (dist = 0)
-    whole_bond_idxs = ( bond_buckets < len(cutoffs) ).triu(diagonal=1).nonzero().t()
+    # assign native bonds the extra token - don't repeat them
+    bond_buckets[native_bond_idxs[0], native_bond_idxs[1]] = cutoffs.shape[0]
+    bond_buckets[native_bond_idxs[1], native_bond_idxs[0]] = cutoffs.shape[0]
+    # find the indexes - symmetric and we dont want the diag
+    close_bond_idxs = ( bond_buckets < len(cutoffs) ).triu(diagonal=1)
+    close_bond_idxs = ( close_bond_idxs + close_bond_idxs.t() ).nonzero().t()
+    # merge all bonds
+    whole_bond_idxs = torch.cat([native_bond_idxs, close_bond_idxs], dim=-1)
 
-    # 2. encode bond -> attrs
+    # 2. ATTRS: encode bond -> attrs
     bond_vecs  = x[ whole_bond_idxs[0] ] - x[ whole_bond_idxs[1] ]
     bond_norms = torch.norm(bond_vecs, dim=-1, keepdim=True)
     bond_norms_enc = encode_dist(bond_norms, scales=needed_info["bond_scales"]).squeeze()
@@ -333,7 +364,7 @@ def encode_whole_bonds(x, x_format="coords", embedd_info={},
 
     # pack scalars and vectors
     bond_n_vectors = 2
-    bond_n_scalars = 2 * len(needed_info["bond_scales"]) + 1 # last one is an embedding of size len(cutoffs)
+    bond_n_scalars = 2 * len(needed_info["bond_scales"]) + 1 # last one is an embedding of size 1+len(cutoffs)
     whole_bond_enc = torch.cat([rearrange(bond_vecs, 'bonds n d -> bonds (n d)'), # 2 
                                 # scalars
                                 bond_norms_enc, # 2 * len(scales)

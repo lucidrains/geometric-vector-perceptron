@@ -6,7 +6,7 @@ setup(
   version = '0.0.8',
   license='MIT',
   description = 'Geometric Vector Perceptron - Pytorch',
-  author = 'Phil Wang and Eric Alcaide',
+  author = 'Phil Wang, Eric Alcaide',
   author_email = 'lucidrains@gmail.com',
   url = 'https://github.com/lucidrains/geometric-vector-perceptron',
   keywords = [
