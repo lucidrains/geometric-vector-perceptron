@@ -202,7 +202,6 @@ class GVP_MPNN(MessagePassing):
         coll_dict = self.__collect__(self.__user_args__,
                                      edge_index, size, kwargs)
         msg_kwargs = self.inspector.distribute('message', coll_dict)
-        out = self.message(**msg_kwargs)
         feats, vectors = self.message(**msg_kwargs)
         # aggregate them
         aggr_kwargs = self.inspector.distribute('aggregate', coll_dict)
