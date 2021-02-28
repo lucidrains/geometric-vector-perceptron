@@ -235,12 +235,9 @@ def prot_covalent_bond(seq, cloud_mask=None):
     scaff = torch.zeros_like(cloud_mask)
     scaff[:, 0] = 1
     idxs = scaff[cloud_mask].nonzero().view(-1)
-    # get poses + idxs from the dict with GVP_DATA
-    bond_idxs = []
-    for i,idx in enumerate(idxs): 
-        bond_idxs.append( idx + torch.tensor( GVP_DATA[seq[i]]['bonds'] ).long().t() )
-    # return all edges
-    return torch.cat(bond_idxs, dim=-1).to(device)
+    # get poses + idxs from the dict with GVP_DATA - return all edges
+    return torch.cat( [ idx + torch.tensor( GVP_DATA[seq[i]]['bonds'] ).long().t() \
+                        for i,idx in enumerate(idxs) ] , dim=-1).to(device)
 
 
 def dist2ca(x, mask=None, eps=1e-7):
@@ -349,23 +346,25 @@ def encode_whole_bonds(x, x_format="coords", embedd_info={},
     bond_buckets[native_bond_idxs[0], native_bond_idxs[1]] = cutoffs.shape[0]
     bond_buckets[native_bond_idxs[1], native_bond_idxs[0]] = cutoffs.shape[0]
     # find the indexes - symmetric and we dont want the diag
-    close_bond_idxs = ( bond_buckets < len(cutoffs) ).triu(diagonal=1)
-    close_bond_idxs = ( close_bond_idxs + close_bond_idxs.t() ).nonzero().t()
+    bond_buckets   += len(cutoffs) * torch.eye(bond_buckets.shape[0]).long()
+    close_bond_idxs = ( bond_buckets < len(cutoffs) ).nonzero().t()
     # merge all bonds
-    whole_bond_idxs = torch.cat([native_bond_idxs, close_bond_idxs], dim=-1)
+    if close_bond_idxs.shape[0] > 0:
+        whole_bond_idxs = torch.cat([native_bond_idxs, close_bond_idxs], dim=-1)
+    else:
+        whole_bond_idxs = native_bond_idxs
 
     # 2. ATTRS: encode bond -> attrs
     bond_vecs  = x[ whole_bond_idxs[0] ] - x[ whole_bond_idxs[1] ]
-    bond_norms = torch.norm(bond_vecs, dim=-1, keepdim=True)
+    bond_norms = dist_mat[ whole_bond_idxs[0] , whole_bond_idxs[1] ]
     bond_norms_enc = encode_dist(bond_norms, scales=needed_info["bond_scales"]).squeeze()
-    # bond unit vector + concat reverse direction
-    bond_vecs /= bond_norms 
-    bond_vecs  = torch.stack([bond_vecs, -bond_vecs], dim=-2)
+    # bond unit vector
+    bond_vecs /= bond_norms.unsqueeze(-1)
 
     # pack scalars and vectors
-    bond_n_vectors = 2
+    bond_n_vectors = 1
     bond_n_scalars = 2 * len(needed_info["bond_scales"]) + 1 # last one is an embedding of size 1+len(cutoffs)
-    whole_bond_enc = torch.cat([rearrange(bond_vecs, 'bonds n d -> bonds (n d)'), # 2 
+    whole_bond_enc = torch.cat([bond_vecs, # 1 vector - no need of reverse - we do 2x bonds (symmetry)
                                 # scalars
                                 bond_norms_enc, # 2 * len(scales)
                                 bond_buckets[ whole_bond_idxs[0], whole_bond_idxs[1] ].unsqueeze(-1) # 1
@@ -376,7 +375,7 @@ def encode_whole_bonds(x, x_format="coords", embedd_info={},
 
     embedd_info = {"bond_n_vectors": bond_n_vectors, 
                    "bond_n_scalars": bond_n_scalars, 
-                   "bond_embedding_nums": [ len(cutoffs) ]}
+                   "bond_embedding_nums": [ len(cutoffs) + 1 ]} # extra one for covalent (default)
 
     return whole_bond_enc, whole_bond_idxs, embedd_info
 
