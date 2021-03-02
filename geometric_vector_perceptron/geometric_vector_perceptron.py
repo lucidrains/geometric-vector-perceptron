@@ -172,8 +172,8 @@ class GVP_MPNN(MessagePassing):
         # update position-wise feedforward
         feats_, vectors_ = self.dropout( *self.W_dh( (feats, vectors) ) )
         feats, vectors   = self.norm[1]( feats+feats_, vectors+vectors_ )
-        # replace in the original
-        x = torch.cat( [feats, vectors.flatten(start_dim=-2)], dim=-1 )
+        # make it residual
+        x = x+torch.cat( [feats, vectors.flatten(start_dim=-2)], dim=-1 )
         return x
 
 
@@ -327,7 +327,6 @@ class GVP_Network(nn.Module):
             x = torch.cat([ x[:, :stop_concat], 
                             emb_layer( to_embedd[:, i] ) 
                           ], dim=-1)
-            
         # pass layers
         for i,layer in enumerate(self.gcnn_layers):
             # embedd edge items (needed everytime since edge_attr and idxs

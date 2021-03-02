@@ -236,8 +236,17 @@ def prot_covalent_bond(seq, cloud_mask=None):
     scaff[:, 0] = 1
     idxs = scaff[cloud_mask].nonzero().view(-1)
     # get poses + idxs from the dict with GVP_DATA - return all edges
-    return torch.cat( [ idx + torch.tensor( GVP_DATA[seq[i]]['bonds'] ).long().t() \
-                        for i,idx in enumerate(idxs) ] , dim=-1).to(device)
+    single_dir = []
+    for i,idx in enumerate(idxs):
+        # bond with next aa
+        if i < idxs.shape[0]:
+            extra = [2, idxs[i+1]-idx]
+        else: 
+            extra = []
+        single_dir.append( idx + torch.tensor( GVP_DATA[seq[i]]['bonds'] + extra ).long().t() )
+    single_dir = torch.cat(single_dir, dim=-1).to(device)
+    # convert to undirected graph
+    return torch.cat( [ single_dir, single_dir[[1,0]] ], dim=-1)
 
 
 def dist2ca(x, mask=None, eps=1e-7):
@@ -344,7 +353,6 @@ def encode_whole_bonds(x, x_format="coords", embedd_info={},
     bond_buckets = torch.bucketize(dist_mat, cutoffs) 
     # assign native bonds the extra token - don't repeat them
     bond_buckets[native_bond_idxs[0], native_bond_idxs[1]] = cutoffs.shape[0]
-    bond_buckets[native_bond_idxs[1], native_bond_idxs[0]] = cutoffs.shape[0]
     # find the indexes - symmetric and we dont want the diag
     bond_buckets   += len(cutoffs) * torch.eye(bond_buckets.shape[0]).long()
     close_bond_idxs = ( bond_buckets < len(cutoffs) ).nonzero().t()
@@ -355,13 +363,12 @@ def encode_whole_bonds(x, x_format="coords", embedd_info={},
         whole_bond_idxs = native_bond_idxs
 
     # 2. ATTRS: encode bond -> attrs
-    bond_vecs  = x[ whole_bond_idxs[0] ] - x[ whole_bond_idxs[1] ]
     bond_norms = dist_mat[ whole_bond_idxs[0] , whole_bond_idxs[1] ]
-    bond_norms_enc = encode_dist(bond_norms, scales=needed_info["bond_scales"]).squeeze()
-    # bond unit vector
+    bond_vecs  = x[ whole_bond_idxs[0] ] - x[ whole_bond_idxs[1] ]
     bond_vecs /= bond_norms.unsqueeze(-1)
+    bond_norms_enc = encode_dist(bond_norms, scales=needed_info["bond_scales"]).squeeze()
 
-    # pack scalars and vectors
+    # pack scalars and vectors - extra token for covalent bonds
     bond_n_vectors = 1
     bond_n_scalars = 2 * len(needed_info["bond_scales"]) + 1 # last one is an embedding of size 1+len(cutoffs)
     whole_bond_enc = torch.cat([bond_vecs, # 1 vector - no need of reverse - we do 2x bonds (symmetry)
@@ -411,7 +418,7 @@ def encode_whole_protein(seq, true_coords, angles, padding_seq,
     seq_int = torch.tensor([AAS.index(aa) for aa in seq[:-padding_seq]], device=device).long()
     aa_id_embedds   = chain2atoms(seq_int, mask=scaffolds["cloud_mask"])
 
-    # CA - SCN distance
+    # CA - SC distance
     dist2ca_vec, dist2ca_norm = dist2ca(coords_wrap) 
     dist2ca_norm_enc = encode_dist(dist2ca_norm, scales=needed_info["dist2ca_norm_scales"]).squeeze()
 
@@ -475,17 +482,17 @@ def get_prot(dataloader_=None, vocab_=None, min_len=80, max_len=150, verbose=Tru
                      for seq in batch.int_seqs.numpy()]
         # try for breaking from 2 loops at once
         try:
-            for i in range(len(batch.int_seqs.numpy())):
+            for i in range(batch.int_seqs.shape[0]):
                 # get variables
                 seq     = real_seqs[i]
                 int_seq = batch.int_seqs[i]
                 angles  = batch.angs[i]
                 # get padding
                 padding_angles = (torch.abs(angles).sum(dim=-1) == 0).long().sum()
-                padding_seq    = (np.array([x for x in seq]) == "_").sum()
+                padding_seq    = (np.array([*seq]) == "_").sum()
                 # only accept sequences with right dimensions and no missing coords
                 # # bigger than 0 to avoid errors  with negative indexes later
-                if list(batch.crds[i].shape)[0]//14 == len(int_seq):
+                if batch.crds[i].shape[0]//14 == int_seq.shape[0]:
                     if ( max_len > len(seq) and len(seq) > min_len ) and \
                        ( padding_seq == padding_angles and padding_seq > 0): 
                         if verbose:
