@@ -173,7 +173,7 @@ class GVP_MPNN(MessagePassing):
         feats_, vectors_ = self.dropout( *self.W_dh( (feats, vectors) ) )
         feats, vectors   = self.norm[1]( feats+feats_, vectors+vectors_ )
         # make it residual
-        x = x+torch.cat( [feats, vectors.flatten(start_dim=-2)], dim=-1 )
+        x = x + torch.cat( [feats, vectors.flatten(start_dim=-2)], dim=-1 )
         return x
 
 
