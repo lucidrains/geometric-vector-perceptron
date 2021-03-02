@@ -156,7 +156,8 @@ class GVP_MPNN(MessagePassing):
 
 
     def forward(self, x: Union[Tensor, OptPairTensor], edge_index: Adj,
-                edge_attr: OptTensor = None, size: Size = None) -> Tensor:
+                edge_attr: OptTensor = None, size: Size = None,
+                residual: bool= False) -> Tensor:
         """"""
         x_size = list(x.shape)[-1]
         # aggregate feats and vectors separately
@@ -173,8 +174,10 @@ class GVP_MPNN(MessagePassing):
         feats_, vectors_ = self.dropout( *self.W_dh( (feats, vectors) ) )
         feats, vectors   = self.norm[1]( feats+feats_, vectors+vectors_ )
         # make it residual
-        x = x + torch.cat( [feats, vectors.flatten(start_dim=-2)], dim=-1 )
-        return x
+        new_x = torch.cat( [feats, vectors.flatten(start_dim=-2)], dim=-1 )
+        if residual:
+          return new_x + x
+        return new_x
 
 
     def message(self, x_j, edge_attr) -> Tensor:
