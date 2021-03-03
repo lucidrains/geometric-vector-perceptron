@@ -217,15 +217,15 @@ class GVP_MPNN(MessagePassing):
 
         
     def __repr__(self):
-        dict_print = { "feats_x_in": feats_x_in, 
-                       "vectors_x_in": vectors_x_in,
-                       "feats_x_out": feats_x_out,
-                       "vectors_x_out": vectors_x_out, 
-                       "feats_edge_in": feats_edge_in,
-                       "vectors_edge_in": vectors_edge_in, 
-                       "feats_edge_out": feats_edge_out,
-                       "vectors_edge_out": vectors_edge_out,
-                       "vector_dim": vector_dim }
+        dict_print = { "feats_x_in": self.feats_x_in,
+                       "vectors_x_in": self.vectors_x_in,
+                       "feats_x_out": self.feats_x_out,
+                       "vectors_x_out": self.vectors_x_out,
+                       "feats_edge_in": self.feats_edge_in,
+                       "vectors_edge_in": self.vectors_edge_in,
+                       "feats_edge_out": self.feats_edge_out,
+                       "vectors_edge_out": self.vectors_edge_out,
+                       "vector_dim": self.vector_dim }
         return  'GVP_MPNN Layer with the following attributes: ' + str(dict_print)
 
 
