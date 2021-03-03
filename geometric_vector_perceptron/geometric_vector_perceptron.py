@@ -103,7 +103,8 @@ class GVP_MPNN(MessagePassing):
                        feats_x_out, vectors_x_out,
                        feats_edge_in, vectors_edge_in,
                        feats_edge_out, vectors_edge_out,
-                       dropout, vector_dim=3, verbose=False, **kwargs):
+                       dropout, residual=False, vector_dim=3, 
+                       verbose=False, **kwargs):
         super(GVP_MPNN, self).__init__(aggr="mean",**kwargs)
         self.verbose = verbose
         # record x dimensions ( vector + scalars )
@@ -121,6 +122,7 @@ class GVP_MPNN(MessagePassing):
         self.norm = nn.ModuleList([GVPLayerNorm(self.feats_x_out), # + self.feats_edge_out
                                    GVPLayerNorm(self.feats_x_out)])
         self.dropout = GVPDropout(dropout)
+        self.residual = residual
         # this receives the vec_in message AND the receiver node
         self.W_EV = nn.Sequential(GVP(
                                       dim_vectors_in = self.vectors_x_in + self.vectors_edge_in, 
@@ -172,9 +174,11 @@ class GVP_MPNN(MessagePassing):
         # update position-wise feedforward
         feats_, vectors_ = self.dropout( *self.W_dh( (feats, vectors) ) )
         feats, vectors   = self.norm[1]( feats+feats_, vectors+vectors_ )
-        # replace in the original
-        x = torch.cat( [feats, vectors.flatten(start_dim=-2)], dim=-1 )
-        return x
+        # make it residual
+        new_x = torch.cat( [feats, vectors.flatten(start_dim=-2)], dim=-1 )
+        if self.residual:
+          return new_x + x
+        return new_x
 
 
     def message(self, x_j, edge_attr) -> Tensor:
@@ -262,7 +266,8 @@ class GVP_Network(nn.Module):
                        feats_edge_out, vectors_edge_out,
                        embedding_nums=[], embedding_dims=[],
                        edge_embedding_nums=[], edge_embedding_dims=[],
-                       dropout=0.0, vector_dim=3, recalc=True, verbose=False):
+                       dropout=0.0, residual=False, vector_dim=3,
+                       recalc=True, verbose=False):
         super().__init__()
 
         self.n_layers         = n_layers 
@@ -296,6 +301,7 @@ class GVP_Network(nn.Module):
         self.feats_edge_out   = feats_edge_out
         self.vectors_edge_out = vectors_edge_out
         self.dropout          = dropout
+        self.residual         = residual
         self.vector_dim       = vector_dim
         self.recalc           = recalc
         self.verbose          = verbose
@@ -306,7 +312,8 @@ class GVP_Network(nn.Module):
                              feats_x_out, vectors_x_out,
                              feats_edge_in, vectors_edge_in,
                              feats_edge_out, vectors_edge_out,
-                             dropout, vector_dim=vector_dim, verbose=verbose)
+                             dropout, residual=residual,
+                             vector_dim=vector_dim, verbose=verbose)
             self.gcnn_layers.append(layer)
 
     def forward(self, x, edge_index, batch, edge_attr,
@@ -327,7 +334,6 @@ class GVP_Network(nn.Module):
             x = torch.cat([ x[:, :stop_concat], 
                             emb_layer( to_embedd[:, i] ) 
                           ], dim=-1)
-            
         # pass layers
         for i,layer in enumerate(self.gcnn_layers):
             # embedd edge items (needed everytime since edge_attr and idxs

@@ -619,7 +619,7 @@ def scn_angle_mask(seq, angles):
                  first angle is theta, second is dihedral
     """ 
     device, precise = angles.device, angles.type()
-    angles = angles.cpu()
+    angles = angles
     # get masks
     theta_mask   = torch.tensor([SUPREME_INFO[aa]['theta_mask'] for aa in seq]).type(precise)
     torsion_mask = torch.tensor([SUPREME_INFO[aa]['torsion_mask'] for aa in seq]).type(precise)
