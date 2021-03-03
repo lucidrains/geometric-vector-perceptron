@@ -182,42 +182,26 @@ SUPREME_INFO = {k: {"cloud_mask": make_cloud_mask(k),
 #################################
 
 
-def encode_dist(x, scales=[1,2,4,8]):
+def encode_dist(x, scales=[1,2,4,8], include_self = True):
     """ Encodes a distance with sines and cosines. 
         Inputs:
         * x: (batch, N) or (N,). data to encode.
               Infer devic and type (f16, f32, f64) from here.
         * scales: (s,) or list. lower or higher depending on distances.
-        Output: (..., number_of_scales*2)
+        Output: (..., num_scales*2 + 1) if include_self or (..., num_scales*2) 
     """
+    x = x.unsqueeze(-1)
     # infer device
     device, precise = x.device, x.type()
     # convert to tensor
     if isinstance(scales, list):
         scales = torch.tensor([scales], device=device).type(precise)
     # get pos encodings
-    sines   = torch.sin(x.unsqueeze(-1) / scales)
-    cosines = torch.cos(x.unsqueeze(-1) / scales)
+    sines   = torch.sin(x / scales)
+    cosines = torch.cos(x / scales)
     # concat and return
-    return torch.cat([sines, cosines], dim=-1)
-
-
-def decode_dist(x, scales=[1,2,4,8]):
-    """ Decodes a distance with from sines and cosines. 
-        Inputs:
-        * x: (..., n_scales * 2) data to decode.
-        * scales: (s,) or list. scales used to encode the data.
-        Outputs: (..., 1). same shape as the encoded distance
-    """
-    # infer device
-    device, precise = x.device, x.type()
-    # convert to tensor
-    if isinstance(scales, list):
-        scales = torch.tensor([scales], device=device).type(precise)
-    # decode with atan
-    half = x.shape[-1]//2
-    x_new = (torch.atan2(x[..., :half], x[..., half:]) * scales) % (2*np.pi)
-    return x_new
+    enc_x = torch.cat([sines, cosines], dim=-1)
+    return torch.cat([enc_x, x], dim=-1) if include_self else enc_x
 
 
 def prot_covalent_bond(seq, cloud_mask=None):
@@ -239,8 +223,8 @@ def prot_covalent_bond(seq, cloud_mask=None):
     single_dir = []
     for i,idx in enumerate(idxs):
         # bond with next aa
-        if i < idxs.shape[0]:
-            extra = [2, idxs[i+1]-idx]
+        if i < idxs.shape[0]-1:
+            extra = [[2, (idxs[i+1]-idx).item()]]
         else: 
             extra = []
         single_dir.append( idx + torch.tensor( GVP_DATA[seq[i]]['bonds'] + extra ).long().t() )
@@ -307,7 +291,7 @@ def chain2atoms(x, mask=None):
     return wrap
 
 
-def from_encode_to_pred(whole_point_enc, embedd_info, needed_info, vec_dim=3):
+def from_encode_to_pred(whole_point_enc, embedd_info=None, needed_info=None, vec_dim=3):
     """ Turns the encoding from the above func into a label / prediction format.
         Containing only the essential for position recovery (radial unit vec + norm)
         Inputs: input_tuple containing:
@@ -317,10 +301,11 @@ def from_encode_to_pred(whole_point_enc, embedd_info, needed_info, vec_dim=3):
         * embedd_info: dict. contains the number of scalar and vector feats.
     """
     vec_dims = vec_dim * embedd_info["point_n_vectors"]
+    start_pos = 2*len(needed_info["atom_pos_scales"])+vec_dims
     return torch.cat([# unit radial vector
                       whole_point_enc[:, :3], 
-                      # encoding of vector norm
-                      whole_point_enc[:, vec_dims : 2*len(needed_info["atom_pos_scales"])+vec_dims ] 
+                      # vector norm
+                      whole_point_enc[:, start_pos:start_pos+1] 
                      ], dim=-1)
 
 
@@ -337,15 +322,17 @@ def encode_whole_bonds(x, x_format="coords", embedd_info={},
     """ 
     device, precise = x.device, x.type()
     # convert to 3d coords if passed as preds
-    if x_format == "prediction":
+    if x_format == "encode":
         pred_x = from_encode_to_pred(x, embedd_info, needed_info)
-        dist_x = decode_dist(pred_x[:, 3:], scales=needed_info["atom_pos_scales"]).mean(dim=-1)
-        x = pred_x[:, :3] * dist_x.unsqueeze(-1)
+        x = pred_x[:, :3] * pred_x[:, 3:4]
 
     # encode bonds
 
-    # 1. BONDS: find the covalent bond_indices
-    native_bond_idxs = prot_covalent_bond(needed_info["seq"])
+    # 1. BONDS: find the covalent bond_indices - allow arg -> DRY
+    if "prot_covalent_bond" in needed_info.keys():
+        native_bond_idxs = needed_info["covalent_bond"]
+    else:
+        native_bond_idxs = prot_covalent_bond(needed_info["seq"])
 
     # points under cutoff = d(i - j) < X 
     cutoffs = torch.tensor(needed_info["cutoffs"], device=device).type(precise)
@@ -370,7 +357,7 @@ def encode_whole_bonds(x, x_format="coords", embedd_info={},
 
     # pack scalars and vectors - extra token for covalent bonds
     bond_n_vectors = 1
-    bond_n_scalars = 2 * len(needed_info["bond_scales"]) + 1 # last one is an embedding of size 1+len(cutoffs)
+    bond_n_scalars = (2 * len(needed_info["bond_scales"]) + 1) + 1 # last one is an embedd of size 1+len(cutoffs)
     whole_bond_enc = torch.cat([bond_vecs, # 1 vector - no need of reverse - we do 2x bonds (symmetry)
                                 # scalars
                                 bond_norms_enc, # 2 * len(scales)
@@ -442,15 +429,20 @@ def encode_whole_protein(seq, true_coords, angles, padding_seq,
 
     # concat so that final is [vector_dims, scalar_dims]
     point_n_vectors = 1 + 1 + 5
-    point_n_scalars = 12 + 16 + 6 + 6 + 2 # the last 2 are to be embedded yet
+    point_n_scalars = 2*len(needed_info["atom_pos_scales"]) + 1 +\
+                      2*len(needed_info["aa_pos_scales"]) + 1 +\
+                      2*len(needed_info["dist2ca_norm_scales"]) + 1+\
+                      rearrange(bb_norms_atoms_enc, 'atoms feats encs -> atoms (feats encs)').shape[1] +\
+                      2 # the last 2 are to be embedded yet
+
     whole_point_enc = torch.cat([ pos_unit_vecs[ :-padding_seq*14 ][ flat_mask ], # 1
                                   dist2ca_vec[scaffolds["cloud_mask"]], # 1
                                   rearrange(bb_vecs_atoms, 'atoms n d -> atoms (n d)'), # 5
                                   # scalars
-                                  pos_unit_norms_enc[ :-padding_seq*14 ][ flat_mask ], # 14
-                                  atom_pos, # 16
-                                  dist2ca_norm_enc[scaffolds["cloud_mask"]], # 6
-                                  rearrange(bb_norms_atoms_enc, 'atoms feats encs -> atoms (feats encs)'), # 6
+                                  pos_unit_norms_enc[ :-padding_seq*14 ][ flat_mask ], # 2n+1
+                                  atom_pos, # 2n+1
+                                  dist2ca_norm_enc[scaffolds["cloud_mask"]], # 2n+1
+                                  rearrange(bb_norms_atoms_enc, 'atoms feats encs -> atoms (feats encs)'), # 2n+1
                                   atom_id_embedds.unsqueeze(-1),
                                   aa_id_embedds.unsqueeze(-1) ], dim=-1) # the last 2 are yet to be embedded
     if free_mem:
