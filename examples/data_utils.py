@@ -203,6 +203,37 @@ def encode_dist(x, scales=[1,2,4,8], include_self = True):
     enc_x = torch.cat([sines, cosines], dim=-1)
     return torch.cat([enc_x, x], dim=-1) if include_self else enc_x
 
+def decode_dist(x, scales=[1,2,4,8], include_self = False):
+    """ Encodes a distance with sines and cosines. 
+        Inputs:
+        * x: (batch, N, 2*fourier_feats (+1) ) or (N,). data to encode.
+              Infer devic and type (f16, f32, f64) from here.
+        * scales: (s,) or list. lower or higher depending on distances.
+        * include_self: whether to average with raw prediction or not.
+        Output: (batch, N)
+    """
+    device, precise = x.device, x.type()
+    # convert to tensor
+    if isinstance(scales, list):
+        scales = torch.tensor([scales], device=device).type(precise)
+    # decode by atan2 and correct negative angles
+    half = x.shape[-1]//2
+    decodes = torch.atan2(x[..., :half], x[..., half:2*half])
+    decodes += (decodes<0).type(precise) * 2*np.pi 
+    # adjust offsets - TODO: handle the case of slightly higher than pi
+    # in higher scale but slightly lower than 0 in smaller scale
+    offsets = torch.zeros_like(decodes)
+    for i in range(decodes.shape[-1]-1, 0, -1):
+        # lower scale starts at previous+2pi if higher scale is > pi.
+        offsets[:, i-1] = 2 * ( offsets[:, i] + (decodes[:, i]>np.pi).type(precise) * np.pi )
+    # correct decodes by offsets
+    decodes += offsets
+    # scale up again and take mean
+    avg_dec = (decodes * scales).mean(dim=-1, keepdim=True)
+    # average with raw prediction
+    if include_self:
+        return 0.5*(avg_dec + x[..., -1:])
+    return avg_dec
 
 def prot_covalent_bond(seq, cloud_mask=None):
     """ Returns the idxs of covalent bonds for a protein.
@@ -291,7 +322,7 @@ def chain2atoms(x, mask=None):
     return wrap
 
 
-def from_encode_to_pred(whole_point_enc, embedd_info=None, needed_info=None, vec_dim=3):
+def from_encode_to_pred(whole_point_enc, use_fourier=False, embedd_info=None, needed_info=None, vec_dim=3):
     """ Turns the encoding from the above func into a label / prediction format.
         Containing only the essential for position recovery (radial unit vec + norm)
         Inputs: input_tuple containing:
@@ -302,10 +333,16 @@ def from_encode_to_pred(whole_point_enc, embedd_info=None, needed_info=None, vec
     """
     vec_dims = vec_dim * embedd_info["point_n_vectors"]
     start_pos = 2*len(needed_info["atom_pos_scales"])+vec_dims
+    if use_fourier:
+        decoded_dist = decode_dist( whole_point_enc[:, vec_dims:start_pos+1],
+                                    scales=needed_info["atom_pos_scales"],
+                                    include_self=False)
+    else:
+        decoded_dist = whole_point_enc[:, start_pos:start_pos+1]
     return torch.cat([# unit radial vector
                       whole_point_enc[:, :3], 
                       # vector norm
-                      whole_point_enc[:, start_pos:start_pos+1] 
+                      decoded_dist
                      ], dim=-1)
 
 
@@ -323,7 +360,7 @@ def encode_whole_bonds(x, x_format="coords", embedd_info={},
     device, precise = x.device, x.type()
     # convert to 3d coords if passed as preds
     if x_format == "encode":
-        pred_x = from_encode_to_pred(x, embedd_info, needed_info)
+        pred_x = from_encode_to_pred(x, embedd_info=embedd_info, needed_info=needed_info)
         x = pred_x[:, :3] * pred_x[:, 3:4]
 
     # encode bonds
