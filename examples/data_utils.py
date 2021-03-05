@@ -395,7 +395,7 @@ def encode_whole_protein(seq, true_coords, angles, padding_seq,
     coords_wrap = rearrange(center_coords, '(l c) d -> l c d', c=14)[:-padding_seq] 
 
     # position in backbone embedding
-    aa_pos = encode_dist( torch.arange(len(seq[:-padding_seq]), device=device), scales=needed_info["aa_pos_scales"])
+    aa_pos = encode_dist( torch.arange(len(seq[:-padding_seq]), device=device).float(), scales=needed_info["aa_pos_scales"])
     atom_pos = chain2atoms(aa_pos)[scaffolds["cloud_mask"]]
 
     # atom identity embedding
