@@ -37,10 +37,12 @@ GVP_DATA = {
                   [6,7], [7,8], [8,9], [8,10]] 
          },
     'N': {
-        'bonds': [[0,1], [1,2], [2,3], [1,4], [4,5], [5,6], [5,7]] 
+        'bonds': [[0,1], [1,2], [2,3], [1,4], [4,5], [5,6],
+                  [5,7]] 
          },
     'D': {
-        'bonds': [[0,1], [1,2], [2,3], [1,4], [4,5], [4,6], [4,6]] 
+        'bonds': [[0,1], [1,2], [2,3], [1,4], [4,5], [5,6],
+                  [5,7]] 
          },
     'C': {
         'bonds': [[0,1], [1,2], [2,3], [1,4], [4,5]] 
@@ -51,7 +53,7 @@ GVP_DATA = {
         },
     'E': {
         'bonds': [[0,1], [1,2], [2,3], [1,4], [4,5], [5,6],
-                  [6,7], [6,8]] 
+                  [6,7], [7,8]]
         },
     'G': {
         'bonds': [[0,1], [1,2], [2,3]] 
@@ -348,7 +350,8 @@ def from_encode_to_pred(whole_point_enc, use_fourier=False, embedd_info=None, ne
 
 def encode_whole_bonds(x, x_format="coords", embedd_info={},
                        needed_info = {"cutoffs": [2,5,10],
-                                      "bond_scales": [.5, 1, 2]}, free_mem=False):
+                                      "bond_scales": [.5, 1, 2]},
+                       free_mem=False, eps=1e-7):
     """ Given some coordinates, and the needed info,
         encodes the bonds from point information.
         * x: (N, 3) or prediction format
@@ -389,7 +392,7 @@ def encode_whole_bonds(x, x_format="coords", embedd_info={},
     # 2. ATTRS: encode bond -> attrs
     bond_norms = dist_mat[ whole_bond_idxs[0] , whole_bond_idxs[1] ]
     bond_vecs  = x[ whole_bond_idxs[0] ] - x[ whole_bond_idxs[1] ]
-    bond_vecs /= bond_norms.unsqueeze(-1)
+    bond_vecs /= (bond_norms + eps).unsqueeze(-1)
     bond_norms_enc = encode_dist(bond_norms, scales=needed_info["bond_scales"]).squeeze()
 
     # pack scalars and vectors - extra token for covalent bonds
