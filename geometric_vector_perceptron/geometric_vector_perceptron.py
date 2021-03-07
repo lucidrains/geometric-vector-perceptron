@@ -322,6 +322,9 @@ class GVP_Network(nn.Module):
             Recalculate edge features every time with the
             `recalc_edge` function.
         """
+        original_x = x.clone()
+        original_edge_index = edge_index.clone()
+        original_edge_attr = edge_attr.clone()
         # do embeddings when needed
         # pick to embedd. embedd sequentially and add to input
         
@@ -352,6 +355,9 @@ class GVP_Network(nn.Module):
             # recalculate edge info - not needed if last layer
             if i < len(self.gcnn_layers)-1 and self.recalc:
                 edge_attr, edge_index, _ = recalc_edge(x.detach()) # returns attr, idx, embedd_info
+            else: 
+                edge_attr = original_edge_attr.clone()
+                edge_index = original_edge_index.clone()
             
             if verbose:
                 print("========")

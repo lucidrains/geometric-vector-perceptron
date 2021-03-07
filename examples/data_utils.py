@@ -519,6 +519,7 @@ def get_prot(dataloader_=None, vocab_=None, min_len=80, max_len=150, verbose=Tru
                 seq     = real_seqs[i]
                 int_seq = batch.int_seqs[i]
                 angles  = batch.angs[i]
+                mask    = batch.msks[i]
                 # get padding
                 padding_angles = (torch.abs(angles).sum(dim=-1) == 0).long().sum()
                 padding_seq    = (np.array([*seq]) == "_").sum()
@@ -538,6 +539,6 @@ def get_prot(dataloader_=None, vocab_=None, min_len=80, max_len=150, verbose=Tru
         except StopIteration:
             break
             
-    return seq, batch.crds[i], angles, padding_seq
+    return seq, batch.crds[i], angles, padding_seq, batch.msks[i]
 
 
