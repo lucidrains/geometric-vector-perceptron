@@ -358,7 +358,8 @@ def encode_whole_bonds(x, x_format="coords", embedd_info={},
         * x_format: one of ["coords" or "prediction"]
         * embedd_info: dict. contains the needed embedding info
         * needed_info: dict. contains additional needed info
-            * cutoffs: list. cutoff distances for bonds
+        * cutoffs: list. cutoff distances for bonds.
+                    can be a string for the k closest (ex: "30_closest")
     """ 
     device, precise = x.device, x.type()
     # convert to 3d coords if passed as preds
@@ -374,15 +375,41 @@ def encode_whole_bonds(x, x_format="coords", embedd_info={},
     else:
         native_bond_idxs = prot_covalent_bond(needed_info["seq"])
 
+    # determine kind of cutoff (hard distance threhsold or closest points)
+    closest = None
+    cutoffs = needed_info["cutoffs"].copy() 
+    if sum( isinstance(ci, str) for ci in cutoffs ) > 0:
+        cutoffs = [-1e-3] # negative so no bond is taken  
+        closest = True
+
     # points under cutoff = d(i - j) < X 
-    cutoffs = torch.tensor(needed_info["cutoffs"], device=device).type(precise)
+    cutoffs = torch.tensor(, device=device).type(precise)
     dist_mat = torch.cdist(x, x, p=2)
+    # do the base case for hard-distance threshold (bonds exist if below X)
     bond_buckets = torch.bucketize(dist_mat, cutoffs) 
     # assign native bonds the extra token - don't repeat them
     bond_buckets[native_bond_idxs[0], native_bond_idxs[1]] = cutoffs.shape[0]
     # find the indexes - symmetric and we dont want the diag
     bond_buckets   += len(cutoffs) * torch.eye(bond_buckets.shape[0]).long()
     close_bond_idxs = ( bond_buckets < len(cutoffs) ).nonzero().t()
+
+    # the K closest (covalent bonds excluded) are considered bonds 
+    if closest:
+        k = int( needed_info["cutoffs"][0].split("_")[0] ) 
+        # copy dist_mat and mask the covalent bonds out
+        masked_dist_mat = dist_mat.clone()
+        masked_dist_mat += torch.eye(masked_dist_mat.shape[0]) * torch.amax(masked_dist_mat)
+        masked_dist_mat[close_bond_idxs[0], close_bond_idxs[1]] = masked_dist_mat[0,0]
+        # argsort by distance
+        _, sorted_col_idxs = torch.topk(masked_dist_mat, k=k, dim=-1)
+        # cat idxs and repeat row idx to match number of column idx
+        sorted_col_idxs = torch.cat(sorted_idxs[:, :k], dim=-1)
+        sorted_row_idxs = torch.repeat_interleave( torch.arange(dist_mat.shape[0]).long(), repeats=k )
+        close_bond_idxs = torch.stack([ sorted_row_idxs, sorted_col_idxs ], dim=0)
+        # dont pick rest of bonds, except the k closest || overwrites the previous bond_buckets
+        bond_buckets = torch.ones_like(dist_mat) * len(cutoffs)
+        bond_buckets[close_bond_idxs[0], close_bond_idxs[1]] = len(cutoffs)-1
+
     # merge all bonds
     if close_bond_idxs.shape[0] > 0:
         whole_bond_idxs = torch.cat([native_bond_idxs, close_bond_idxs], dim=-1)
@@ -405,7 +432,10 @@ def encode_whole_bonds(x, x_format="coords", embedd_info={},
                                ], dim=-1) 
     # free gpu mem
     if free_mem:
-        del bond_buckets, bond_norms_enc, bond_vecs, dist_mat
+        del bond_buckets, bond_norms_enc, bond_vecs, dist_mat,\
+            close_bond_idxs, native_bond_idxs
+        if closest: 
+            del masked_dist_mat, sorted_col_idxs, sorted_row_idxs
 
     embedd_info = {"bond_n_vectors": bond_n_vectors, 
                    "bond_n_scalars": bond_n_scalars, 
