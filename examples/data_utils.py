@@ -383,7 +383,7 @@ def encode_whole_bonds(x, x_format="coords", embedd_info={},
         closest = True
 
     # points under cutoff = d(i - j) < X 
-    cutoffs = torch.tensor(, device=device).type(precise)
+    cutoffs = torch.tensor(cutoffs, device=device).type(precise)
     dist_mat = torch.cdist(x, x, p=2)
     # do the base case for hard-distance threshold (bonds exist if below X)
     bond_buckets = torch.bucketize(dist_mat, cutoffs) 
