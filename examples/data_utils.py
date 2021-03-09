@@ -399,11 +399,11 @@ def encode_whole_bonds(x, x_format="coords", embedd_info={},
         # copy dist_mat and mask the covalent bonds out
         masked_dist_mat = dist_mat.clone()
         masked_dist_mat += torch.eye(masked_dist_mat.shape[0]) * torch.amax(masked_dist_mat)
-        masked_dist_mat[close_bond_idxs[0], close_bond_idxs[1]] = masked_dist_mat[0,0]
+        masked_dist_mat[close_bond_idxs[0], close_bond_idxs[1]] = masked_dist_mat[0,0].clone()
         # argsort by distance
         _, sorted_col_idxs = torch.topk(masked_dist_mat, k=k, dim=-1)
         # cat idxs and repeat row idx to match number of column idx
-        sorted_col_idxs = torch.cat(sorted_idxs[:, :k], dim=-1)
+        sorted_col_idxs = rearrange(sorted_col_idxs[:, :k], '... n k -> ... (n k)')
         sorted_row_idxs = torch.repeat_interleave( torch.arange(dist_mat.shape[0]).long(), repeats=k )
         close_bond_idxs = torch.stack([ sorted_row_idxs, sorted_col_idxs ], dim=0)
         # dont pick rest of bonds, except the k closest || overwrites the previous bond_buckets
