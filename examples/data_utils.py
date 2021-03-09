@@ -375,6 +375,7 @@ def encode_whole_bonds(x, x_format="coords", embedd_info={},
     else:
         native_bond_idxs = prot_covalent_bond(needed_info["seq"])
 
+    native_bond_idxs = native_bond_idxs.to(device)
     # determine kind of cutoff (hard distance threhsold or closest points)
     closest = None
     cutoffs = needed_info["cutoffs"].copy() 
@@ -390,7 +391,7 @@ def encode_whole_bonds(x, x_format="coords", embedd_info={},
     # assign native bonds the extra token - don't repeat them
     bond_buckets[native_bond_idxs[0], native_bond_idxs[1]] = cutoffs.shape[0]
     # find the indexes - symmetric and we dont want the diag
-    bond_buckets   += len(cutoffs) * torch.eye(bond_buckets.shape[0]).long()
+    bond_buckets   += len(cutoffs) * torch.eye(bond_buckets.shape[0], device=device).long()
     close_bond_idxs = ( bond_buckets < len(cutoffs) ).nonzero().t()
 
     # the K closest (covalent bonds excluded) are considered bonds 
