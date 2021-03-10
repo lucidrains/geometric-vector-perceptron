@@ -267,7 +267,7 @@ class GVP_Network(nn.Module):
                        embedding_nums=[], embedding_dims=[],
                        edge_embedding_nums=[], edge_embedding_dims=[],
                        dropout=0.0, residual=False, vector_dim=3,
-                       recalc=True, verbose=False):
+                       recalc=1, verbose=False):
         super().__init__()
 
         self.n_layers         = n_layers 
@@ -352,16 +352,17 @@ class GVP_Network(nn.Module):
             # pass layers
             x = layer(x, edge_index, edge_attr, size=bsize)
 
-            # recalculate edge info - not needed if last layer
-            if i < len(self.gcnn_layers)-1 and self.recalc:
-                edge_attr, edge_index, _ = recalc_edge(x.detach()) # returns attr, idx, embedd_info
+            # recalculate edge info every self.recalc steps
+            # but not needed if last layer of last iteration
+            if (1%self.recalc == 0) and not (i == self.n_layers-1) :
+                edge_attr, edge_index, _ = recalc_edge(x) # returns attr, idx, embedd_info
             else: 
                 edge_attr = original_edge_attr.clone()
                 edge_index = original_edge_index.clone()
             
             if verbose:
                 print("========")
-                print(i, "layer, nlinks:", edge_attr.shape)
+                print("iter:", j, "layer:", i, "nlinks:", edge_attr.shape)
             
         return x
 
