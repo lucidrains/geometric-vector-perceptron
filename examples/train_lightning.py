@@ -54,6 +54,15 @@ class StructureModel(pl.LightningModule):
         super().__init__()
 
         self.save_hyperparameters()
+        
+        self.needed_info = {
+            "cutoffs": [cutoffs], # -1e-3 for just covalent, "30_closest", 5. for under 5A, etc
+            "bond_scales": [1, 2, 4],
+            "aa_pos_scales": [1, 2, 4, 8, 16, 32, 64, 128],
+            "atom_pos_scales": [1, 2, 4, 8, 16, 32],
+            "dist2ca_norm_scales": [1, 2, 4],
+            "bb_norms_atoms": [0.5],  # will encode 3 vectors with this
+        }
 
         self.model = GVP_Network(
             n_layers=depth,
@@ -61,25 +70,18 @@ class StructureModel(pl.LightningModule):
             vectors_x_in=7,
             feats_x_out=48,
             vectors_x_out=7,
-            feats_edge_in=4,
+            feats_edge_in=8,
             vectors_edge_in=1,
-            feats_edge_out=4,
+            feats_edge_out=8,
             vectors_edge_out=1,
             embedding_nums=[36, 20],
             embedding_dims=[16, 16],
             edge_embedding_nums=[2],
             edge_embedding_dims=[2],
             residual=True,
+            recalc=1
         )
 
-        self.needed_info = {
-            "cutoffs": [cutoffs],
-            "bond_scales": [1],
-            "aa_pos_scales": [1, 2, 4, 8, 16, 32, 64, 128],
-            "atom_pos_scales": [1, 2, 4, 8, 16, 32],
-            "dist2ca_norm_scales": [1, 2, 4],
-            "bb_norms_atoms": [0.5],  # will encode 3 vectors with this
-        }
         self.noise = noise
         self.init_lr = init_lr
 
@@ -164,25 +166,17 @@ class StructureModel(pl.LightningModule):
 
         ## align - sometimes svc fails - idk why
         try:
-            pred_aligned, target_aligned = kabsch_torch(
-                pred_coords.t(), target_coords.t()
-            )  # (3, N)
-            loss = (
-                (pred_aligned.t() - target_aligned.t())[
-                    flat_chain_mask[flat_cloud_mask]
-                ]
-                ** 2
-            ).mean() ** 0.5
+            pred_aligned, target_aligned = kabsch_torch(pred_coords.t(), target_coords.t()) # (3, N)
+            base_aligned, _ = kabsch_torch(base_coords.t(), target_coords.t())
+            loss = ( (pred_aligned.t() - target_aligned.t())[flat_chain_mask[flat_cloud_mask]]**2 ).mean()**0.5 
+            loss_base = ( (base_aligned.t() - target_aligned.t())[flat_chain_mask[flat_cloud_mask]]**2 ).mean()**0.5 
         except:
             pred_aligned, target_aligned = None, None
-            print("svd failed convergence, ep:")
-            loss = None
-            # loss = ((pred_coords.t() - target_coords.t())[flat_chain_mask[flat_cloud_mask]] ** 2).mean() ** 0.5
-        # measure error
-        loss_base = (
-            (base_coords - target_coords)[flat_chain_mask[flat_cloud_mask]] ** 2
-        ).mean() ** 0.5
+            print("svd failed convergence, ep:", ep)
+            loss = ( (pred_coords.t() - target_coords.t())[flat_chain_mask[flat_cloud_mask]]**2 ).mean()**0.5
+            loss_base = ( (base_coords - target_coords)[flat_chain_mask[flat_cloud_mask]]**2 ).mean()**0.5 
 
+        # free gpu mem
         del true_coords, angles, pre_target_x, edge_index, edge_attrs
         del scores, target_coords, pred_coords, base_coords
         del encoded, pre_target, target_aligned, pred_aligned
