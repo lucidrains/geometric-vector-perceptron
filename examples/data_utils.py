@@ -541,19 +541,17 @@ def get_prot(dataloader_=None, vocab_=None, min_len=80, max_len=150, verbose=Tru
         * verbose: bool. verbosity level
     """
     for batch in dataloader_['train']:
-        real_seqs = [''.join([vocab_.int2char(aa) for aa in seq]) \
-                     for seq in batch.int_seqs.numpy()]
         # try for breaking from 2 loops at once
         try:
             for i in range(batch.int_seqs.shape[0]):
                 # get variables
-                seq     = real_seqs[i]
+                seq     = ''.join([vocab_.int2char(aa) for aa in batch.int_seqs[i].numpy()])
                 int_seq = batch.int_seqs[i]
                 angles  = batch.angs[i]
                 mask    = batch.msks[i]
                 # get padding
                 padding_angles = (torch.abs(angles).sum(dim=-1) == 0).long().sum()
-                padding_seq    = (np.array([*seq]) == "_").sum()
+                padding_seq    = (batch.int_seqs[i] == 20).sum()
                 # only accept sequences with right dimensions and no missing coords
                 # # bigger than 0 to avoid errors  with negative indexes later
                 if batch.crds[i].shape[0]//14 == int_seq.shape[0]:
