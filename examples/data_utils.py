@@ -399,13 +399,13 @@ def encode_whole_bonds(x, x_format="coords", embedd_info={},
         k = int( needed_info["cutoffs"][0].split("_")[0] ) 
         # copy dist_mat and mask the covalent bonds out
         masked_dist_mat = dist_mat.clone()
-        masked_dist_mat += torch.eye(masked_dist_mat.shape[0]) * torch.amax(masked_dist_mat)
+        masked_dist_mat += torch.eye(masked_dist_mat.shape[0], device=device) * torch.amax(masked_dist_mat)
         masked_dist_mat[close_bond_idxs[0], close_bond_idxs[1]] = masked_dist_mat[0,0].clone()
         # argsort by distance
         _, sorted_col_idxs = torch.topk(masked_dist_mat, k=k, dim=-1)
         # cat idxs and repeat row idx to match number of column idx
         sorted_col_idxs = rearrange(sorted_col_idxs[:, :k], '... n k -> ... (n k)')
-        sorted_row_idxs = torch.repeat_interleave( torch.arange(dist_mat.shape[0]).long(), repeats=k )
+        sorted_row_idxs = torch.repeat_interleave( torch.arange(dist_mat.shape[0], device=device).long(), repeats=k )
         close_bond_idxs = torch.stack([ sorted_row_idxs, sorted_col_idxs ], dim=0)
         # dont pick rest of bonds, except the k closest || overwrites the previous bond_buckets
         bond_buckets = torch.ones_like(dist_mat) * len(cutoffs)
@@ -555,8 +555,7 @@ def get_prot(dataloader_=None, vocab_=None, min_len=80, max_len=150, verbose=Tru
                 # only accept sequences with right dimensions and no missing coords
                 # # bigger than 0 to avoid errors  with negative indexes later
                 if batch.crds[i].shape[0]//14 == int_seq.shape[0]:
-                    if ( max_len > len(seq) and len(seq) > min_len ) and \
-                       ( padding_seq == padding_angles and padding_seq > 0): 
+                    if ( max_len > len(seq) and len(seq) > min_len ) and padding_seq == padding_angles: 
                         if verbose:
                             print("stopping at sequence of length", len(seq))
                             # print(len(seq), angles.shape, "paddings: ", padding_seq, padding_angles)
