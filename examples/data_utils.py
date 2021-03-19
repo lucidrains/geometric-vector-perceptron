@@ -453,8 +453,8 @@ def encode_whole_protein(seq, true_coords, angles, padding_seq,
     #################
     # encode points #
     #################
-    scaffolds = build_scaffolds_from_scn_angles(seq[:(-padding_seq) or None], angles[:(-padding_seq) or None])
-    flat_mask = rearrange(scaffolds["cloud_mask"], 'l c -> (l c)')
+    cloud_mask = torch.tensor(scn_cloud_mask(seq[:-padding_seq or None])).bool().to(device)
+    flat_mask = rearrange(cloud_mask, 'l c -> (l c)')
     # embedd everything
 
     # general position embedding
@@ -463,18 +463,18 @@ def encode_whole_protein(seq, true_coords, angles, padding_seq,
     pos_unit_vecs  = center_coords / pos_unit_norms
     pos_unit_norms_enc = encode_dist(pos_unit_norms, scales=needed_info["atom_pos_scales"]).squeeze()
     # reformat coordinates to scn (L, 14, 3) - TODO: solve if padding=0
-    coords_wrap = rearrange(center_coords, '(l c) d -> l c d', c=14)[:(-padding_seq) or None]
+    coords_wrap = rearrange(center_coords, '(l c) d -> l c d', c=14)[:-padding_seq or None] 
 
     # position in backbone embedding
-    aa_pos = encode_dist( torch.arange(len(seq[:(-padding_seq) or None]), device=device).float(), scales=needed_info["aa_pos_scales"])
-    atom_pos = chain2atoms(aa_pos)[scaffolds["cloud_mask"]]
+    aa_pos = encode_dist( torch.arange(len(seq[:-padding_seq or None]), device=device).float(), scales=needed_info["aa_pos_scales"])
+    atom_pos = chain2atoms(aa_pos)[cloud_mask]
 
     # atom identity embedding
-    atom_id_embedds = torch.stack([SUPREME_INFO[k]["atom_id_embedd"] for k in seq[:(-padding_seq) or None]],
-                                  dim=0)[scaffolds["cloud_mask"]].to(device)
+    atom_id_embedds = torch.stack([SUPREME_INFO[k]["atom_id_embedd"] for k in seq[:-padding_seq or None]], 
+                                  dim=0)[cloud_mask].to(device)
     # aa embedding
-    seq_int = torch.tensor([AAS.index(aa) for aa in seq[:(-padding_seq) or None]], device=device).long()
-    aa_id_embedds   = chain2atoms(seq_int, mask=scaffolds["cloud_mask"])
+    seq_int = torch.tensor([AAS.index(aa) for aa in seq[:-padding_seq or None]], device=device).long()
+    aa_id_embedds   = chain2atoms(seq_int, mask=cloud_mask)
 
     # CA - SC distance
     dist2ca_vec, dist2ca_norm = dist2ca(coords_wrap) 
@@ -482,14 +482,14 @@ def encode_whole_protein(seq, true_coords, angles, padding_seq,
 
     # BACKBONE feats
     vecs, norms    = orient_aa(coords_wrap)
-    bb_vecs_atoms  = chain2atoms(torch.transpose(vecs, 0, 1), mask=scaffolds["cloud_mask"])
-    bb_norms_atoms = chain2atoms(torch.transpose(norms, 0, 1), mask=scaffolds["cloud_mask"])
+    bb_vecs_atoms  = chain2atoms(torch.transpose(vecs, 0, 1), mask=cloud_mask)
+    bb_norms_atoms = chain2atoms(torch.transpose(norms, 0, 1), mask=cloud_mask)
     bb_norms_atoms_enc = encode_dist(bb_norms_atoms, scales=[0.5])
 
     ################
     # encode bonds #
     ################
-    bond_info = encode_whole_bonds(x = coords_wrap[scaffolds["cloud_mask"]],
+    bond_info = encode_whole_bonds(x = coords_wrap[cloud_mask],
                                    x_format = "coords",
                                    embedd_info = {},
                                    needed_info = needed_info )
@@ -506,18 +506,18 @@ def encode_whole_protein(seq, true_coords, angles, padding_seq,
                       rearrange(bb_norms_atoms_enc, 'atoms feats encs -> atoms (feats encs)').shape[1] +\
                       2 # the last 2 are to be embedded yet
 
-    whole_point_enc = torch.cat([ pos_unit_vecs[ :(-padding_seq*14) or None ][ flat_mask ], # 1
-                                  dist2ca_vec[scaffolds["cloud_mask"]], # 1
+    whole_point_enc = torch.cat([ pos_unit_vecs[ :-padding_seq*14 or None ][ flat_mask ], # 1
+                                  dist2ca_vec[cloud_mask], # 1
                                   rearrange(bb_vecs_atoms, 'atoms n d -> atoms (n d)'), # 5
                                   # scalars
-                                  pos_unit_norms_enc[ :(-padding_seq*14) or None ][ flat_mask ], # 2n+1
+                                  pos_unit_norms_enc[ :-padding_seq*14 or None ][ flat_mask ], # 2n+1
                                   atom_pos, # 2n+1
-                                  dist2ca_norm_enc[scaffolds["cloud_mask"]], # 2n+1
+                                  dist2ca_norm_enc[cloud_mask], # 2n+1
                                   rearrange(bb_norms_atoms_enc, 'atoms feats encs -> atoms (feats encs)'), # 2n+1
                                   atom_id_embedds.unsqueeze(-1),
                                   aa_id_embedds.unsqueeze(-1) ], dim=-1) # the last 2 are yet to be embedded
     if free_mem:
-        del pos_unit_vecs, dist2ca_vec, bb_vecs_atoms, pos_unit_norms_enc, \
+        del pos_unit_vecs, dist2ca_vec, bb_vecs_atoms, pos_unit_norms_enc, cloud_mask,\
             atom_pos, dist2ca_norm_enc, bb_norms_atoms_enc, atom_id_embedds, aa_id_embedds
 
 

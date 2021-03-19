@@ -519,8 +519,9 @@ BB_BUILD_INFO = {
 def make_cloud_mask(aa):
     """ relevent points will be 1. paddings will be 0. """
     mask = np.zeros(14)
-    n_atoms = 4+len( SC_BUILD_INFO[aa]["atom-names"] )
-    mask[:n_atoms] = 1
+    if aa != "_":
+        n_atoms = 4+len( SC_BUILD_INFO[aa]["atom-names"] )
+        mask[:n_atoms] = 1
     return mask
 
 def make_bond_mask(aa):
