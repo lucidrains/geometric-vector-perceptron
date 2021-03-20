@@ -342,12 +342,12 @@ class GVP_Network(nn.Module):
             # embedd edge items (needed everytime since edge_attr and idxs
             # are recalculated every pass)
             to_embedd = edge_attr[:, -len(self.edge_embedding_dims):].long()
-            for i,edge_emb_layer in enumerate(self.edge_emb_layers):
+            for j,edge_emb_layer in enumerate(self.edge_emb_layers):
                 # the portion corresponding to `to_embedd` part gets dropped
                 # at first iter
-                stop_concat = -len(self.edge_embedding_dims) if i == 0 else x.shape[-1]
-                edge_attr = torch.cat([ edge_attr[:, :-len(self.edge_embedding_dims) + i], 
-                                        edge_emb_layer( to_embedd[:, i] ) 
+                stop_concat = -len(self.edge_embedding_dims) if j == 0 else x.shape[-1]
+                edge_attr = torch.cat([ edge_attr[:, :-len(self.edge_embedding_dims) + j], 
+                                        edge_emb_layer( to_embedd[:, j] ) 
                               ], dim=-1)
             # pass layers
             x = layer(x, edge_index, edge_attr, size=bsize)
@@ -355,7 +355,7 @@ class GVP_Network(nn.Module):
             # recalculate edge info every self.recalc steps
             # but not needed if last layer of last iteration
             if (1%self.recalc == 0) and not (i == self.n_layers-1) :
-                edge_attr, edge_index, _ = recalc_edge(x) # returns attr, idx, embedd_info
+                edge_index, edge_attr, _ = recalc_edge(x) # returns attr, idx, embedd_info
             else: 
                 edge_attr = original_edge_attr.clone()
                 edge_index = original_edge_index.clone()
