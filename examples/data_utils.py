@@ -400,9 +400,9 @@ def encode_whole_bonds(x, x_format="coords", embedd_info={},
         # copy dist_mat and mask the covalent bonds out
         masked_dist_mat = dist_mat.clone()
         masked_dist_mat += torch.eye(masked_dist_mat.shape[0], device=device) * torch.amax(masked_dist_mat)
-        masked_dist_mat[close_bond_idxs[0], close_bond_idxs[1]] = masked_dist_mat[0,0].clone()
-        # argsort by distance
-        _, sorted_col_idxs = torch.topk(masked_dist_mat, k=k, dim=-1)
+        masked_dist_mat[native_bond_idxs[0], native_bond_idxs[1]] = masked_dist_mat[0,0].clone()
+        # argsort by distance || *(-1) so min is first
+        _, sorted_col_idxs = torch.topk(-masked_dist_mat, k=k, dim=-1)
         # cat idxs and repeat row idx to match number of column idx
         sorted_col_idxs = rearrange(sorted_col_idxs[:, :k], '... n k -> ... (n k)')
         sorted_row_idxs = torch.repeat_interleave( torch.arange(dist_mat.shape[0], device=device).long(), repeats=k )
@@ -442,7 +442,7 @@ def encode_whole_bonds(x, x_format="coords", embedd_info={},
                    "bond_n_scalars": bond_n_scalars, 
                    "bond_embedding_nums": [ len(cutoffs) + 1 ]} # extra one for covalent (default)
 
-    return whole_bond_enc, whole_bond_idxs, embedd_info
+    return whole_bond_idxs, whole_bond_enc, embedd_info
 
 
 def encode_whole_protein(seq, true_coords, angles, padding_seq,
@@ -493,7 +493,7 @@ def encode_whole_protein(seq, true_coords, angles, padding_seq,
                                    x_format = "coords",
                                    embedd_info = {},
                                    needed_info = needed_info )
-    whole_bond_enc, whole_bond_idxs, bond_embedd_info = bond_info
+    whole_bond_idxs, whole_bond_enc, bond_embedd_info = bond_info
     #########
     # merge #
     #########
