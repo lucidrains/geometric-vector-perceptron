@@ -595,12 +595,16 @@ SUPREME_INFO = {k: {"cloud_mask": make_cloud_mask(k),
                 for k in "ARNDCQEGHILKMFPSTWYV_"}
 
 # @jit()
-def scn_cloud_mask(seq):
+def scn_cloud_mask(seq, coords=None):
     """ Gets the boolean mask atom positions (not all aas have same atoms). 
         Inputs: 
         * seqs: (length) iterable of 1-letter aa codes of a protein
+        * coords: optional .(batch, lc, 3). sidechainnet coords.
+                  returns the true mask (solves potential atoms that might not be provided)
         Outputs: (length, 14) boolean mask 
     """ 
+    if coords is not None:
+        return  ( rearrange(coords, 'b (l c) d -> b l c d', c=14) != 0 ).sum(dim=-1) == 0
     return torch.tensor([SUPREME_INFO[aa]['cloud_mask'] for aa in seq])
 
 
@@ -672,6 +676,8 @@ def build_scaffolds_from_scn_angles(seq, angles, device="auto"):
                   * (L, 3) for torsion angles
                   * (L, 3) bond angles
                   * (L, 6) sidechain angles
+        * coords: (L, 3) sidechainnet coords. builds the mask with those instead
+                  (better accuracy if modified residues present).
         Outputs:
         * cloud_mask: (L, 14 ) mask of points that should be converted to coords 
         * point_ref_mask: (3, L, 11) maps point (except n-ca-c) to idxs of
@@ -684,7 +690,12 @@ def build_scaffolds_from_scn_angles(seq, angles, device="auto"):
     if device == "auto":
         device = angles.device
 
-    cloud_mask = torch.tensor(scn_cloud_mask(seq)).bool().to(device)
+    if coords is not None: 
+        cloud_mask = scn_cloud_mask(seq, coords=coords)
+    else: 
+        cloud_mask = scn_cloud_mask(seq)
+
+    cloud_mask = torch.tensor(cloud_mask).bool().to(device)
     
     point_ref_mask = torch.tensor(scn_index_mask(seq)).long().to(device)
      
