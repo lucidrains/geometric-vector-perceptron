@@ -4,6 +4,7 @@ import os
 import sys
 # science
 import torch
+import torch_sparse
 import numpy as np 
 from einops import repeat, rearrange
 # custom utils - from https://github.com/EleutherAI/mp_nerf
@@ -26,6 +27,7 @@ def get_atom_ids_dict():
 #################################
 
 AAS = "ARNDCQEGHILKMFPSTWYV_"
+AAS2NUM = {k: AAS.index(k) for k in AAS}
 ATOM_IDS = get_atom_ids_dict()
 # numbers follow the same order as sidechainnet atoms
 GVP_DATA = { 
@@ -237,14 +239,53 @@ def decode_dist(x, scales=[1,2,4,8], include_self = False):
         return 0.5*(avg_dec + x[..., -1:])
     return avg_dec
 
-def prot_covalent_bond(seq, cloud_mask=None):
+def nth_deg_adjacency(adj_mat, n=1, sparse=False):
+    """ Calculates the n-th degree adjacency matrix.
+        Performs mm of adj_mat and adds the newly added.
+        Default is dense. Mods for sparse version are done when needed.
+        Inputs: 
+        * adj_mat: (N, N) adjacency tensor
+        * n: int. degree of the output adjacency
+        * sparse: bool. whether to use torch-sparse module
+        Outputs: 
+        * edge_idxs: the ij positions of the adjacency matrix
+        * edge_attrs: the degree of connectivity (1 for neighs, 2 for neighs^2 )
+    """
+    adj_mat = adj_mat.float()
+    attr_mat = torch.zeros_like(adj_mat)
+        
+    for i in range(n):
+        if i == 0:
+            attr_mat += adj_mat
+            continue
+
+        if i == 1 and sparse: 
+            # create sparse adj tensor
+            adj_mat = torch.sparse.FloatTensor( adj_mat.nonzero().t(),
+                                                adj_mat[ adj_mat!=0 ] ).to(adj_mat.device).coalesce()
+            idxs, vals = adj_mat.indices(), adj_mat.values()
+            m, k, n = 3 * [adj_mat.shape[0]] # (m, n) * (n, k) , but adj_mats are squared: m=n=k
+
+        if sparse:
+            idxs, vals = torch_sparse.spspmm(idxs, vals, idxs, vals, m=m, k=k, n=n)
+            adj_mat = torch.zeros_like(attr_mat)
+            adj_mat[idxs[0], idxs[1]] = vals.bool().float()
+        else:
+            adj_mat = (adj_mat @ adj_mat).bool().float() 
+
+        attr_mat[ (adj_mat - attr_mat.bool().float()).bool() ] += i+1
+
+    return adj_mat, attr_mat
+
+
+def prot_covalent_bond(seq, adj_degree=1, cloud_mask=None):
     """ Returns the idxs of covalent bonds for a protein.
         Inputs 
         * seq: str. Protein sequence in 1-letter AA code.
         * cloud_mask: mask selecting the present atoms.
         Outputs: edge_idxs
     """
-    # create or infer
+    # create or infer cloud_mask
     if cloud_mask is None: 
         cloud_mask = scn_cloud_mask(seq).bool()
     device, precise = cloud_mask.device, cloud_mask.type()
@@ -253,17 +294,23 @@ def prot_covalent_bond(seq, cloud_mask=None):
     scaff[:, 0] = 1
     idxs = scaff[cloud_mask].nonzero().view(-1)
     # get poses + idxs from the dict with GVP_DATA - return all edges
-    single_dir = []
+    adj_mat = torch.zeros(idxs.amax()+14, idxs.amax()+14)
     for i,idx in enumerate(idxs):
         # bond with next aa
+        extra = []
         if i < idxs.shape[0]-1:
             extra = [[2, (idxs[i+1]-idx).item()]]
-        else: 
-            extra = []
-        single_dir.append( idx + torch.tensor( GVP_DATA[seq[i]]['bonds'] + extra ).long().t() )
-    single_dir = torch.cat(single_dir, dim=-1).to(device)
-    # convert to undirected graph
-    return torch.cat( [ single_dir, single_dir[[1,0]] ], dim=-1)
+
+        bonds = idx + torch.tensor( GVP_DATA[seq[i]]['bonds'] + extra ).long().t() 
+        adj_mat[bonds[0], bonds[1]] = 1.
+    # convert to undirected
+    adj_mat = adj_mat + adj_mat.t()
+    # do N_th degree adjacency
+    adj_mat, attr_mat = nth_deg_adjacency(adj_mat, n=adj_degree, sparse=True)
+
+    edge_idxs = attr_mat.nonzero().t().long()
+    edge_attrs = attr_mat[edge_idxs[0], edge_idxs[1]]
+    return edge_idxs, edge_attrs
 
 
 def dist2ca(x, mask=None, eps=1e-7):
@@ -350,7 +397,8 @@ def from_encode_to_pred(whole_point_enc, use_fourier=False, embedd_info=None, ne
 
 def encode_whole_bonds(x, x_format="coords", embedd_info={},
                        needed_info = {"cutoffs": [2,5,10],
-                                      "bond_scales": [.5, 1, 2]},
+                                      "bond_scales": [.5, 1, 2],
+                                      "adj_degree": 1},
                        free_mem=False, eps=1e-7):
     """ Given some coordinates, and the needed info,
         encodes the bonds from point information.
@@ -358,8 +406,15 @@ def encode_whole_bonds(x, x_format="coords", embedd_info={},
         * x_format: one of ["coords" or "prediction"]
         * embedd_info: dict. contains the needed embedding info
         * needed_info: dict. contains additional needed info
-        * cutoffs: list. cutoff distances for bonds.
-                    can be a string for the k closest (ex: "30_closest")
+            { cutoffs: list. cutoff distances for bonds.
+                       can be a string for the k closest (ex: "30_closest"),
+                       empty list for just covalent.
+              bond_scales: list. fourier encodings
+              adj_degree: int. degree of adj (2 means adj of adj is my adj)
+                               0 for no adjacency
+            }
+        * free_mem: whether to delete variables
+        * eps: constant for numerical stability
     """ 
     device, precise = x.device, x.type()
     # convert to 3d coords if passed as preds
@@ -370,66 +425,80 @@ def encode_whole_bonds(x, x_format="coords", embedd_info={},
     # encode bonds
 
     # 1. BONDS: find the covalent bond_indices - allow arg -> DRY
+    native = None
     if "prot_covalent_bond" in needed_info.keys():
-        native_bond_idxs = needed_info["covalent_bond"]
-    else:
-        native_bond_idxs = prot_covalent_bond(needed_info["seq"])
+        native = True
+        native_bonds = needed_info["covalent_bond"]
+    elif needed_info["adj_degree"]:
+        native = True
+        native_bonds  = prot_covalent_bond(needed_info["seq"], needed_info["adj_degree"])
+        
+    if native: 
+        native_idxs, native_attrs = native_bonds[0].to(device), native_bonds[1].to(device)
 
-    native_bond_idxs = native_bond_idxs.to(device)
     # determine kind of cutoff (hard distance threhsold or closest points)
     closest = None
-    cutoffs = needed_info["cutoffs"].copy() 
-    if sum( isinstance(ci, str) for ci in cutoffs ) > 0:
-        cutoffs = [-1e-3] # negative so no bond is taken  
-        closest = True
+    if len(needed_info["cutoffs"]) > 0: 
+        cutoffs = needed_info["cutoffs"].copy() 
+        if sum( isinstance(ci, str) for ci in cutoffs ) > 0:
+            cutoffs = [-1e-3] # negative so no bond is taken  
+            closest = int( needed_info["cutoffs"][0].split("_")[0] ) 
 
-    # points under cutoff = d(i - j) < X 
-    cutoffs = torch.tensor(cutoffs, device=device).type(precise)
-    dist_mat = torch.cdist(x, x, p=2)
-    # do the base case for hard-distance threshold (bonds exist if below X)
-    bond_buckets = torch.bucketize(dist_mat, cutoffs) 
-    # assign native bonds the extra token - don't repeat them
-    bond_buckets[native_bond_idxs[0], native_bond_idxs[1]] = cutoffs.shape[0]
-    # find the indexes - symmetric and we dont want the diag
-    bond_buckets   += len(cutoffs) * torch.eye(bond_buckets.shape[0], device=device).long()
-    close_bond_idxs = ( bond_buckets < len(cutoffs) ).nonzero().t()
+        # points under cutoff = d(i - j) < X 
+        cutoffs = torch.tensor(cutoffs, device=device).type(precise)
+        dist_mat = torch.cdist(x, x, p=2)
+
+    # normal buckets
+    bond_buckets = torch.zeros(*x.shape[:-1], x.shape[-2], device=device).type(precise)
+    if len(needed_info["cutoffs"]) > 0 and not closest:
+        # count from latest degree of adjacency given
+        bond_buckets = torch.bucketize(dist_mat, cutoffs)
+        bond_buckets[native_idxs[0], native_idxs[1]] = cutoffs.shape[0]
+        # find the indexes - symmetric and we dont want the diag
+        bond_buckets   += cutoffs.shape[0] * torch.eye(bond_buckets.shape[0], device=device).long()
+        close_bond_idxs = ( bond_buckets < cutoffs.shape[0] ).nonzero().t()
+        # move away from poses reserved for native
+        bond_buckets[close_bond_idxs[0], close_bond_idxs[1]] += needed_info["adj_degree"]+1
 
     # the K closest (covalent bonds excluded) are considered bonds 
-    if closest:
-        k = int( needed_info["cutoffs"][0].split("_")[0] ) 
+    elif closest:
+        k = closest
         # copy dist_mat and mask the covalent bonds out
         masked_dist_mat = dist_mat.clone()
         masked_dist_mat += torch.eye(masked_dist_mat.shape[0], device=device) * torch.amax(masked_dist_mat)
-        masked_dist_mat[native_bond_idxs[0], native_bond_idxs[1]] = masked_dist_mat[0,0].clone()
+        masked_dist_mat[native_idxs[0], native_idxs[1]] = masked_dist_mat[0,0].clone()
         # argsort by distance || *(-1) so min is first
         _, sorted_col_idxs = torch.topk(-masked_dist_mat, k=k, dim=-1)
         # cat idxs and repeat row idx to match number of column idx
         sorted_col_idxs = rearrange(sorted_col_idxs[:, :k], '... n k -> ... (n k)')
-        sorted_row_idxs = torch.repeat_interleave( torch.arange(dist_mat.shape[0], device=device).long(), repeats=k )
+        sorted_row_idxs = torch.repeat_interleave( torch.arange(dist_mat.shape[0]).long(), repeats=k ).to(device)
         close_bond_idxs = torch.stack([ sorted_row_idxs, sorted_col_idxs ], dim=0)
-        # dont pick rest of bonds, except the k closest || overwrites the previous bond_buckets
-        bond_buckets = torch.ones_like(dist_mat) * len(cutoffs)
-        bond_buckets[close_bond_idxs[0], close_bond_idxs[1]] = len(cutoffs)-1
+        # move away from poses reserved for native
+        bond_buckets = torch.ones_like(dist_mat) * (needed_info["adj_degree"]+1)
 
     # merge all bonds
-    if close_bond_idxs.shape[0] > 0:
-        whole_bond_idxs = torch.cat([native_bond_idxs, close_bond_idxs], dim=-1)
+    if len(needed_info["cutoffs"]) > 0:
+        if close_bond_idxs.shape[0] > 0:
+            whole_bond_idxs = torch.cat([native_idxs, close_bond_idxs], dim=-1)
     else:
-        whole_bond_idxs = native_bond_idxs
+        whole_bond_idxs = native_idxs
 
     # 2. ATTRS: encode bond -> attrs
-    bond_norms = dist_mat[ whole_bond_idxs[0] , whole_bond_idxs[1] ]
     bond_vecs  = x[ whole_bond_idxs[0] ] - x[ whole_bond_idxs[1] ]
+    bond_norms = torch.norm(bond_vecs, dim=-1)
     bond_vecs /= (bond_norms + eps).unsqueeze(-1)
     bond_norms_enc = encode_dist(bond_norms, scales=needed_info["bond_scales"]).squeeze()
 
+    if native:
+        bond_buckets[native_idxs[0], native_idxs[1]] = native_attrs
+    bond_attrs = bond_buckets[whole_bond_idxs[0] , whole_bond_idxs[1]]
     # pack scalars and vectors - extra token for covalent bonds
     bond_n_vectors = 1
     bond_n_scalars = (2 * len(needed_info["bond_scales"]) + 1) + 1 # last one is an embedd of size 1+len(cutoffs)
     whole_bond_enc = torch.cat([bond_vecs, # 1 vector - no need of reverse - we do 2x bonds (symmetry)
                                 # scalars
                                 bond_norms_enc, # 2 * len(scales)
-                                bond_buckets[ whole_bond_idxs[0], whole_bond_idxs[1] ].unsqueeze(-1) # 1
+                                (bond_attrs-1).unsqueeze(-1) # 1 
                                ], dim=-1) 
     # free gpu mem
     if free_mem:
@@ -440,7 +509,7 @@ def encode_whole_bonds(x, x_format="coords", embedd_info={},
 
     embedd_info = {"bond_n_vectors": bond_n_vectors, 
                    "bond_n_scalars": bond_n_scalars, 
-                   "bond_embedding_nums": [ len(cutoffs) + 1 ]} # extra one for covalent (default)
+                   "bond_embedding_nums": [ len(needed_info["cutoffs"]) + needed_info["adj_degree"] ]} # extra one for covalent (default)
 
     return whole_bond_idxs, whole_bond_enc, embedd_info
 
@@ -473,7 +542,7 @@ def encode_whole_protein(seq, true_coords, angles, padding_seq,
     atom_id_embedds = torch.stack([SUPREME_INFO[k]["atom_id_embedd"] for k in seq[:-padding_seq or None]], 
                                   dim=0)[cloud_mask].to(device)
     # aa embedding
-    seq_int = torch.tensor([AAS.index(aa) for aa in seq[:-padding_seq or None]], device=device).long()
+    seq_int = torch.tensor([AAS2NUM[aa] for aa in seq[:-padding_seq or None]], device=device).long()
     aa_id_embedds   = chain2atoms(seq_int, mask=cloud_mask)
 
     # CA - SC distance
