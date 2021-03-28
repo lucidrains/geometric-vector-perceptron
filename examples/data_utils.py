@@ -270,7 +270,7 @@ def prot_covalent_bond(seq, adj_degree=1, cloud_mask=None):
         if i == 0:
             attr_mat += adj_mat
             continue
-            
+
         adj_mat = (adj_mat @ adj_mat).bool().float() 
         attr_mat[n_adj_mat[0], n_adj_mat[1]] = ( adj_mat - attr_mat.bool().float() ) * (i+1)
 
@@ -446,7 +446,7 @@ def encode_whole_bonds(x, x_format="coords", embedd_info={},
         whole_bond_idxs = native_bond_idxs
 
     # 2. ATTRS: encode bond -> attrs
-    bond_norms = dist_mat[ *whole_bond_idxs[0] , whole_bond_idxs[1] ]
+    bond_norms = dist_mat[ whole_bond_idxs[0] , whole_bond_idxs[1] ]
     bond_vecs  = x[ whole_bond_idxs[0] ] - x[ whole_bond_idxs[1] ]
     bond_vecs /= (bond_norms + eps).unsqueeze(-1)
     bond_norms_enc = encode_dist(bond_norms, scales=needed_info["bond_scales"]).squeeze()
