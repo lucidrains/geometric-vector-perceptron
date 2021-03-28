@@ -26,6 +26,7 @@ def get_atom_ids_dict():
 #################################
 
 AAS = "ARNDCQEGHILKMFPSTWYV_"
+AAS2NUM = {k: AAS.index(k) for k in AAS}
 ATOM_IDS = get_atom_ids_dict()
 # numbers follow the same order as sidechainnet atoms
 GVP_DATA = { 
@@ -272,9 +273,9 @@ def prot_covalent_bond(seq, adj_degree=1, cloud_mask=None):
             continue
 
         adj_mat = (adj_mat @ adj_mat).bool().float() 
-        attr_mat[n_adj_mat[0], n_adj_mat[1]] = ( adj_mat - attr_mat.bool().float() ) * (i+1)
+        attr_mat[ (adj_mat - attr_mat.bool().float()).bool() ] += i+1
 
-    edge_idxs = attr_mat.nonzero().t()
+    edge_idxs = attr_mat.nonzero().t().long()
     edge_attrs = attr_mat[edge_idxs[0], edge_idxs[1]]
     return edge_idxs, edge_attrs
 
@@ -403,7 +404,7 @@ def encode_whole_bonds(x, x_format="coords", embedd_info={},
         native_idxs, native_attrs = native_bonds[0].to(device), native_bonds[1].to(device)
 
     # determine kind of cutoff (hard distance threhsold or closest points)
-    if len(cutoffs) > 0: 
+    if len(needed_info["cutoffs"]) > 0: 
         closest = None
         cutoffs = needed_info["cutoffs"].copy() 
         if sum( isinstance(ci, str) for ci in cutoffs ) > 0:
@@ -417,11 +418,13 @@ def encode_whole_bonds(x, x_format="coords", embedd_info={},
     # normal buckets
     if not closest:
         # count from latest degree of adjacency given
-        bond_buckets = torch.bucketize(dist_mat, cutoffs) + native_attrs
+        bond_buckets = torch.bucketize(dist_mat, cutoffs)
         bond_buckets[native_idxs[0], native_idxs[1]] = cutoffs.shape[0]
         # find the indexes - symmetric and we dont want the diag
         bond_buckets   += len(cutoffs) * torch.eye(bond_buckets.shape[0], device=device).long()
         close_bond_idxs = ( bond_buckets < cutoffs.shape[0] ).nonzero().t()
+        # move away from poses reserved for native
+        bond_buckets[close_bond_idxs[0], close_bond_idxs[1]] += needed_info["adj_degree"]+1
 
     # the K closest (covalent bonds excluded) are considered bonds 
     else:
@@ -436,14 +439,14 @@ def encode_whole_bonds(x, x_format="coords", embedd_info={},
         sorted_col_idxs = rearrange(sorted_col_idxs[:, :k], '... n k -> ... (n k)')
         sorted_row_idxs = torch.repeat_interleave( torch.arange(dist_mat.shape[0]).long(), repeats=k ).to(device)
         close_bond_idxs = torch.stack([ sorted_row_idxs, sorted_col_idxs ], dim=0)
-        # set closest k to index 0
-        bond_buckets = torch.zeros_like(dist_mat)
+        # move away from poses reserved for native
+        bond_buckets = torch.ones_like(dist_mat) * (needed_info["adj_degree"]+1)
 
     # merge all bonds
     if close_bond_idxs.shape[0] > 0:
-        whole_bond_idxs = torch.cat([native_bond_idxs, close_bond_idxs], dim=-1)
+        whole_bond_idxs = torch.cat([native_idxs, close_bond_idxs], dim=-1)
     else:
-        whole_bond_idxs = native_bond_idxs
+        whole_bond_idxs = native_idxs
 
     # 2. ATTRS: encode bond -> attrs
     bond_norms = dist_mat[ whole_bond_idxs[0] , whole_bond_idxs[1] ]
@@ -451,9 +454,9 @@ def encode_whole_bonds(x, x_format="coords", embedd_info={},
     bond_vecs /= (bond_norms + eps).unsqueeze(-1)
     bond_norms_enc = encode_dist(bond_norms, scales=needed_info["bond_scales"]).squeeze()
 
-    bond_attrs = bond_buckets[whole_bond_idxs[0] , whole_bond_idxs[1]]
     if native:
-        bond_attrs[native_idxs[0], native_idxs[1]] = native_attrs
+        bond_buckets[native_idxs[0], native_idxs[1]] = native_attrs
+    bond_attrs = bond_buckets[whole_bond_idxs[0] , whole_bond_idxs[1]]
     # pack scalars and vectors - extra token for covalent bonds
     bond_n_vectors = 1
     bond_n_scalars = (2 * len(needed_info["bond_scales"]) + 1) + 1 # last one is an embedd of size 1+len(cutoffs)
@@ -504,7 +507,7 @@ def encode_whole_protein(seq, true_coords, angles, padding_seq,
     atom_id_embedds = torch.stack([SUPREME_INFO[k]["atom_id_embedd"] for k in seq[:-padding_seq or None]], 
                                   dim=0)[cloud_mask].to(device)
     # aa embedding
-    seq_int = torch.tensor([AAS.index(aa) for aa in seq[:-padding_seq or None]], device=device).long()
+    seq_int = torch.tensor([AAS2NUM[aa] for aa in seq[:-padding_seq or None]], device=device).long()
     aa_id_embedds   = chain2atoms(seq_int, mask=cloud_mask)
 
     # CA - SC distance
