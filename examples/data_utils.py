@@ -404,19 +404,22 @@ def encode_whole_bonds(x, x_format="coords", embedd_info={},
         native_idxs, native_attrs = native_bonds[0].to(device), native_bonds[1].to(device)
 
     # determine kind of cutoff (hard distance threhsold or closest points)
+    buckets, closest = None, None
     if len(needed_info["cutoffs"]) > 0: 
-        closest = None
         cutoffs = needed_info["cutoffs"].copy() 
         if sum( isinstance(ci, str) for ci in cutoffs ) > 0:
             cutoffs = [-1e-3] # negative so no bond is taken  
             closest = int( needed_info["cutoffs"][0].split("_")[0] ) 
+        else:
+            buckets = True
 
         # points under cutoff = d(i - j) < X 
         cutoffs = torch.tensor(cutoffs, device=device).type(precise)
         dist_mat = torch.cdist(x, x, p=2)
 
     # normal buckets
-    if not closest:
+    bond_buckets = torch.zeros(x.shape[:-1], x.shape[-2], device=device).type(precise)
+    if buckets:
         # count from latest degree of adjacency given
         bond_buckets = torch.bucketize(dist_mat, cutoffs)
         bond_buckets[native_idxs[0], native_idxs[1]] = cutoffs.shape[0]
@@ -449,8 +452,8 @@ def encode_whole_bonds(x, x_format="coords", embedd_info={},
         whole_bond_idxs = native_idxs
 
     # 2. ATTRS: encode bond -> attrs
-    bond_norms = dist_mat[ whole_bond_idxs[0] , whole_bond_idxs[1] ]
     bond_vecs  = x[ whole_bond_idxs[0] ] - x[ whole_bond_idxs[1] ]
+    bond_norms = torch.norm(bond_vecs, dim=-1)
     bond_vecs /= (bond_norms + eps).unsqueeze(-1)
     bond_norms_enc = encode_dist(bond_norms, scales=needed_info["bond_scales"]).squeeze()
 
