@@ -1,9 +1,18 @@
 import torch
 from torch import nn, einsum
 from torch_geometric.nn import MessagePassing
+
 # types
+
 from typing import Optional, List, Union
 from torch_geometric.typing import OptPairTensor, Adj, Size, OptTensor, Tensor
+
+# helper functions
+
+def exists(val):
+    return val is not None
+
+# classes
 
 class GVP(nn.Module):
     def __init__(
@@ -14,7 +23,8 @@ class GVP(nn.Module):
         dim_feats_in,
         dim_feats_out,
         feats_activation = nn.Sigmoid(),
-        vectors_activation = nn.Sigmoid()
+        vectors_activation = nn.Sigmoid(),
+        vector_gating = False
     ):
         super().__init__()
         self.dim_vectors_in = dim_vectors_in
@@ -33,6 +43,10 @@ class GVP(nn.Module):
             feats_activation
         )
 
+        # branching logic to use old GVP, or GVP with vector gating
+
+        self.scalar_to_vector_gates = nn.Linear(dim_feats_out, dim_vectors_out) if vector_gating else None
+
     def forward(self, data):
         feats, vectors = data
         b, n, _, v, c  = *feats.shape, *vectors.shape
@@ -44,13 +58,18 @@ class GVP(nn.Module):
         Vu = einsum('b h c, h u -> b u c', Vh, self.Wu)
 
         sh = torch.norm(Vh, p = 2, dim = -1)
-        vu = torch.norm(Vu, p = 2, dim = -1, keepdim = True)
 
         s = torch.cat((feats, sh), dim = 1)
 
         feats_out = self.to_feats_out(s)
-        vectors_out = self.vectors_activation(vu) * Vu
 
+        if exists(self.scalar_to_vector_gates):
+            gating = self.scalar_to_vector_gates(feats_out)
+            gating = gating.unsqueeze(dim = -1)
+        else:
+            gating = torch.norm(Vu, p = 2, dim = -1, keepdim = True)
+
+        vectors_out = self.vectors_activation(gating) * Vu
         return (feats_out, vectors_out)
 
 class GVPDropout(nn.Module):

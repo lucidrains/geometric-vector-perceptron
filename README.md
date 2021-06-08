@@ -11,6 +11,7 @@ $ pip install geometric-vector-perceptron
 ```
 
 ### Functionality
+
 * `GVP`: Implementing the basic geometric vector perceptron.
 * `GVPDropout`: Adapted dropout for GVP in MPNN context
 * `GVPLayerNorm`: Adapted LayerNorm for GVP in MPNN context
@@ -27,7 +28,8 @@ model = GVP(
     dim_vectors_in = 1024,
     dim_feats_in = 512,
     dim_vectors_out = 256,
-    dim_feats_out = 512
+    dim_feats_out = 512,
+    vector_gating = True   # use the vector gating as proposed in https://arxiv.org/abs/2106.03843
 )
 
 feats, vectors = (torch.randn(1, 512), torch.randn(1, 1024, 3))
@@ -46,7 +48,8 @@ model = GVP(
     dim_vectors_in = 1024,
     dim_feats_in = 512,
     dim_vectors_out = 256,
-    dim_feats_out = 512
+    dim_feats_out = 512,
+    vector_gating = True
 )
 
 dropout = GVPDropout(0.2)
@@ -66,13 +69,22 @@ The original implementation in TF by the paper authors can be found here: https:
 ## Citations
 
 ```bibtex
-@inproceedings{
-    anonymous2021learning,
-    title={Learning from Protein Structure with Geometric Vector Perceptrons},
-    author={Anonymous},
-    booktitle={Submitted to International Conference on Learning Representations},
-    year={2021},
-    url={https://openreview.net/forum?id=1YLJDvSx6J4},
-    note={under review}
+@inproceedings{anonymous2021learning,
+    title   = {Learning from Protein Structure with Geometric Vector Perceptrons},
+    author  = {Anonymous},
+    booktitle = {Submitted to International Conference on Learning Representations},
+    year    = {2021},
+    url     = {https://openreview.net/forum?id=1YLJDvSx6J4}
+}
+```
+
+```bibtex
+@misc{jing2021equivariant,
+    title   = {Equivariant Graph Neural Networks for 3D Macromolecular Structure}, 
+    author  = {Bowen Jing and Stephan Eismann and Pratham N. Soni and Ron O. Dror},
+    year    = {2021},
+    eprint  = {2106.03843},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.LG}
 }
 ```
